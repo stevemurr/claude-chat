@@ -1,0 +1,33 @@
+name: ClaudeChat
+options:
+  bundleIdPrefix: com.claude
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+
+packages:
+  MarkdownUI:
+    url: https://github.com/gonzalezreal/swift-markdown-ui
+    from: "2.3.0"
+
+targets:
+  ClaudeChat:
+    type: application
+    platform: macOS
+    sources:
+      - path: ClaudeChat
+        excludes:
+          - Info.plist
+    dependencies:
+      - package: MarkdownUI
+    info:
+      path: ClaudeChat/Info.plist
+      properties:
+        LSUIElement: true
+        CFBundleDisplayName: ClaudeChat
+        NSAppleEventsUsageDescription: ClaudeChat needs to send Apple Events.
+    settings:
+      INFOPLIST_FILE: ClaudeChat/Info.plist
+      PRODUCT_BUNDLE_IDENTIFIER: com.claude.ClaudeChat
+      SWIFT_VERSION: "5.9"
+      MACOSX_DEPLOYMENT_TARGET: "13.0"

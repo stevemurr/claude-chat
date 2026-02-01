@@ -89,6 +89,9 @@ struct ContentView: View {
             claudeService.resetConversation()
             isInputFocused = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
+            showSettings = true
+        }
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }

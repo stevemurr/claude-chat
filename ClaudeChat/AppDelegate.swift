@@ -4,11 +4,13 @@ import Carbon.HIToolbox
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow?
+    private var statusItem: NSStatusItem?
     private var eventMonitor: Any?
     private var localEventMonitor: Any?
     private var hotkeyObserver: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        setupMenuBar()
         setupWindow()
         registerHotkey()
 
@@ -19,7 +21,71 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             queue: .main
         ) { [weak self] _ in
             self?.reregisterHotkey()
+            self?.updateMenuBarHotkeyDisplay()
         }
+    }
+
+    private func setupMenuBar() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+
+        if let button = statusItem?.button {
+            button.image = NSImage(systemSymbolName: "bubble.left.fill", accessibilityDescription: "ClaudeChat")
+            button.image?.isTemplate = true
+        }
+
+        let menu = NSMenu()
+
+        let showItem = NSMenuItem(title: "Show Window", action: #selector(showWindowAction), keyEquivalent: "")
+        showItem.target = self
+        menu.addItem(showItem)
+
+        let newChatItem = NSMenuItem(title: "New Chat", action: #selector(newChatAction), keyEquivalent: "n")
+        newChatItem.keyEquivalentModifierMask = .command
+        newChatItem.target = self
+        menu.addItem(newChatItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettingsAction), keyEquivalent: ",")
+        settingsItem.keyEquivalentModifierMask = .command
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let hotkeyItem = NSMenuItem(title: "Hotkey: \(SettingsManager.shared.hotkey.displayString)", action: nil, keyEquivalent: "")
+        hotkeyItem.isEnabled = false
+        hotkeyItem.tag = 100 // Tag to find it later for updates
+        menu.addItem(hotkeyItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let quitItem = NSMenuItem(title: "Quit ClaudeChat", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quitItem.keyEquivalentModifierMask = .command
+        menu.addItem(quitItem)
+
+        statusItem?.menu = menu
+    }
+
+    private func updateMenuBarHotkeyDisplay() {
+        if let menu = statusItem?.menu,
+           let hotkeyItem = menu.item(withTag: 100) {
+            hotkeyItem.title = "Hotkey: \(SettingsManager.shared.hotkey.displayString)"
+        }
+    }
+
+    @objc private func showWindowAction() {
+        showWindow()
+    }
+
+    @objc private func newChatAction() {
+        showWindow()
+        NotificationCenter.default.post(name: .newChat, object: nil)
+    }
+
+    @objc private func openSettingsAction() {
+        showWindow()
+        NotificationCenter.default.post(name: .openSettings, object: nil)
     }
 
     private func setupWindow() {
@@ -139,6 +205,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 extension Notification.Name {
     static let focusInput = Notification.Name("focusInput")
     static let newChat = Notification.Name("newChat")
+    static let openSettings = Notification.Name("openSettings")
 }
 
 extension AppDelegate: NSWindowDelegate {

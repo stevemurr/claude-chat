@@ -18,6 +18,7 @@ targets:
       - path: ClaudeChat
         excludes:
           - Info.plist
+          - ClaudeChat.entitlements
     dependencies:
       - package: MarkdownUI
     info:
@@ -26,8 +27,13 @@ targets:
         LSUIElement: true
         CFBundleDisplayName: ClaudeChat
         NSAppleEventsUsageDescription: ClaudeChat needs to send Apple Events.
+    entitlements:
+      path: ClaudeChat/ClaudeChat.entitlements
     settings:
       INFOPLIST_FILE: ClaudeChat/Info.plist
       PRODUCT_BUNDLE_IDENTIFIER: com.claude.ClaudeChat
       SWIFT_VERSION: "5.9"
       MACOSX_DEPLOYMENT_TARGET: "13.0"
+      CODE_SIGN_ENTITLEMENTS: ClaudeChat/ClaudeChat.entitlements
+      ENABLE_APP_SANDBOX: NO
+      ENABLE_HARDENED_RUNTIME: NO

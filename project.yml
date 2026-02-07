@@ -19,6 +19,9 @@ targets:
         excludes:
           - Info.plist
           - ClaudeChat.entitlements
+          - Resources
+      - path: ClaudeChat/Resources
+        buildPhase: resources
     dependencies:
       - package: MarkdownUI
     info:

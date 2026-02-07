@@ -1,0 +1,21 @@
+{
+  "name": "tiptap-editor",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@tiptap/core": "^2.11.5",
+    "@tiptap/starter-kit": "^2.11.5",
+    "@tiptap/extension-task-list": "^2.11.5",
+    "@tiptap/extension-task-item": "^2.11.5",
+    "@tiptap/extension-placeholder": "^2.11.5",
+    "@tiptap/suggestion": "^2.11.5",
+    "@tiptap/pm": "^2.11.5",
+    "tiptap-markdown": "^0.8.10"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2"
+  },
+  "scripts": {
+    "build": "npx esbuild editor.js --bundle --format=iife --outfile=../ClaudeChat/Resources/tiptap-bundle.js"
+  }
+}

@@ -37,16 +37,24 @@ class ClaudeService: ObservableObject {
     private var conversationStarted = false
     private var currentProcess: Process?
 
-    func sendMessage(_ message: String, onUpdate: @escaping (StreamUpdate) -> Void) async -> [String]? {
+    func sendMessage(_ message: String, noteContext: String? = nil, onUpdate: @escaping (StreamUpdate) -> Void) async -> [String]? {
         isLoading = true
         isWorking = false
         lastError = nil
         streamingText = ""
 
+        // Build full message with note context prepended
+        let fullMessage: String
+        if let context = noteContext, !context.isEmpty {
+            fullMessage = "[The user has attached the following notes for reference:]\n\(context)\n\n[User's message:]\n\(message)"
+        } else {
+            fullMessage = message
+        }
+
         let shouldContinue = conversationStarted
 
         let result = await Task.detached(priority: .userInitiated) {
-            await self.runClaudeStreaming(message: message, continueConversation: shouldContinue, onUpdate: onUpdate)
+            await self.runClaudeStreaming(message: fullMessage, continueConversation: shouldContinue, onUpdate: onUpdate)
         }.value
 
         switch result {

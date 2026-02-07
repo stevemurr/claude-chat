@@ -1,41 +1,167 @@
 import SwiftUI
 import MarkdownUI
 
+enum AppMode {
+    case chat
+    case notepad
+}
+
 struct ContentView: View {
     @StateObject private var claudeService = ClaudeService()
     @StateObject private var historyService = ChatHistoryService()
+    @StateObject private var noteService = NoteService()
+    @StateObject private var commandPaletteService = CommandPaletteService()
+    @StateObject private var titleService = TitleService()
     @State private var inputText = ""
     @State private var showHistory = false
     @State private var showSettings = false
     @State private var streamingText = ""
     @State private var isWorking = false
+    @State private var isAtBottom = true
+    @State private var showScrollButton = false
+    @State private var appMode: AppMode = .chat
+    @State private var showAutocomplete = false
+    @State private var autocompleteQuery = ""
+    @State private var autocompleteSelectedIndex = 0
     @FocusState private var isInputFocused: Bool
 
     var body: some View {
         HStack(spacing: 0) {
-            // History sidebar
+            // Sidebar - conditional based on mode
             if showHistory {
-                HistorySidebar(historyService: historyService, showHistory: $showHistory)
-                    .frame(width: 220)
+                Group {
+                    switch appMode {
+                    case .chat:
+                        HistorySidebar(historyService: historyService, showHistory: $showHistory)
+                    case .notepad:
+                        NoteSidebar(noteService: noteService)
+                    }
+                }
+                .frame(width: 220)
 
                 Divider()
             }
 
-            // Main chat area
+            // Main content area
             VStack(spacing: 0) {
-                // Header
-                ChatHeader(
+                // Unified Header
+                UnifiedHeader(
                     showHistory: $showHistory,
                     showSettings: $showSettings,
-                    onNewChat: {
-                        historyService.newSession()
-                        claudeService.resetConversation()
+                    appMode: $appMode,
+                    onNew: {
+                        switch appMode {
+                        case .chat:
+                            historyService.newSession()
+                            claudeService.resetConversation()
+                        case .notepad:
+                            noteService.newNote()
+                        }
                     }
                 )
 
                 Divider()
 
-                // Messages
+                // Content area - conditional based on mode
+                switch appMode {
+                case .chat:
+                    chatContent
+
+                case .notepad:
+                    NotepadContentView(noteService: noteService, titleService: titleService)
+                }
+
+                // Bottom mode bar
+                HStack {
+                    Spacer()
+                    HStack(spacing: 2) {
+                        ModeChip(label: "Chat", icon: "bubble.left.fill",
+                                 isActive: appMode == .chat, color: .orange) { appMode = .chat }
+                        ModeChip(label: "Notes", icon: "doc.text",
+                                 isActive: appMode == .notepad, color: .blue) { appMode = .notepad }
+                    }
+                    .padding(3)
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.8))
+                    .cornerRadius(8)
+                    Spacer()
+                }
+                .padding(.vertical, 6)
+                .background(appMode == .chat ? Color.orange.opacity(0.06) : Color.blue.opacity(0.06))
+                .overlay(alignment: .top) {
+                    (appMode == .chat ? Color.orange : Color.blue).opacity(0.2).frame(height: 1)
+                }
+            }
+        }
+        .frame(minWidth: 500, minHeight: 400)
+        .background(Color(NSColor.textBackgroundColor))
+        .onAppear {
+            isInputFocused = true
+            commandPaletteService.configure(noteService: noteService, historyService: historyService)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .focusInput)) { _ in
+            isInputFocused = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .newChat)) { _ in
+            if appMode == .chat {
+                historyService.newSession()
+                claudeService.resetConversation()
+                isInputFocused = true
+            } else {
+                noteService.newNote()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .newNote)) { _ in
+            appMode = .notepad
+            noteService.newNote()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleMode)) { _ in
+            cycleMode()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
+            showSettings = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openCommandPalette)) { _ in
+            showAutocomplete = false
+            commandPaletteService.show()
+        }
+        .onChange(of: appMode) { newMode in
+            if newMode == .chat {
+                // Save any in-progress note when switching to chat
+                noteService.saveCurrentNote()
+            }
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
+        }
+        .overlay {
+            if commandPaletteService.isVisible {
+                ZStack(alignment: .top) {
+                    // Backdrop
+                    Color.black.opacity(0.45)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            commandPaletteService.dismiss()
+                        }
+
+                    // Palette positioned near top
+                    CommandPaletteView(
+                        service: commandPaletteService,
+                        onSelect: { item in
+                            handleCommandPaletteSelection(item)
+                        }
+                    )
+                    .padding(.top, 60)
+                }
+            }
+        }
+    }
+
+    // MARK: - Chat Content (extracted from body)
+
+    private var chatContent: some View {
+        VStack(spacing: 0) {
+            // Messages
+            ZStack(alignment: .bottom) {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 16) {
@@ -48,79 +174,275 @@ struct ContentView: View {
                                 StreamingBlock(text: streamingText, isWorking: isWorking)
                                     .id("streaming")
                             }
+
+                            // Bottom anchor for scroll detection
+                            Color.clear
+                                .frame(height: 1)
+                                .id("bottom")
                         }
                         .padding(20)
+                        .background(
+                            GeometryReader { geometry in
+                                Color.clear
+                                    .preference(
+                                        key: ScrollOffsetPreferenceKey.self,
+                                        value: geometry.frame(in: .named("scroll")).maxY
+                                    )
+                            }
+                        )
+                    }
+                    .coordinateSpace(name: "scroll")
+                    .onPreferenceChange(ScrollOffsetPreferenceKey.self) { maxY in
+                        let newIsAtBottom = maxY < 100
+                        if newIsAtBottom != isAtBottom {
+                            isAtBottom = newIsAtBottom
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showScrollButton = !newIsAtBottom
+                            }
+                        }
                     }
                     .onChange(of: historyService.currentSession.messages.count) { _ in
-                        scrollToBottom(proxy: proxy)
+                        if isAtBottom {
+                            scrollToBottom(proxy: proxy)
+                        } else {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showScrollButton = true
+                            }
+                        }
                     }
                     .onChange(of: claudeService.isLoading) { _ in
-                        scrollToBottom(proxy: proxy)
+                        if isAtBottom {
+                            scrollToBottom(proxy: proxy)
+                        }
                     }
                     .onChange(of: streamingText) { _ in
-                        scrollToBottom(proxy: proxy)
+                        if isAtBottom {
+                            scrollToBottom(proxy: proxy)
+                        }
                     }
                     .onChange(of: isWorking) { _ in
-                        scrollToBottom(proxy: proxy)
+                        if isAtBottom {
+                            scrollToBottom(proxy: proxy)
+                        }
                     }
+                    .onChange(of: showScrollButton) { show in
+                        if !show {
+                            scrollToBottom(proxy: proxy)
+                        }
+                    }
+                    .background(
+                        ScrollProxyHolder(proxy: proxy, trigger: $showScrollButton)
+                    )
                 }
 
-                Divider()
-
-                // Input area
-                InputArea(
-                    inputText: $inputText,
-                    isInputFocused: _isInputFocused,
-                    isLoading: claudeService.isLoading,
-                    onSend: sendMessage
-                )
+                // Scroll to bottom button
+                if showScrollButton {
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showScrollButton = false
+                            isAtBottom = true
+                        }
+                    }) {
+                        Image(systemName: "arrow.down")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 36, height: 36)
+                            .background(Color.accentColor)
+                            .clipShape(Circle())
+                            .shadow(color: Color.black.opacity(0.2), radius: 4, x: 0, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 12)
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                }
             }
-        }
-        .frame(minWidth: 500, minHeight: 400)
-        .background(Color(NSColor.textBackgroundColor))
-        .onAppear {
-            isInputFocused = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .focusInput)) { _ in
-            isInputFocused = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .newChat)) { _ in
-            historyService.newSession()
-            claudeService.resetConversation()
-            isInputFocused = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
-            showSettings = true
-        }
-        .sheet(isPresented: $showSettings) {
-            SettingsView()
+
+            Divider()
+
+            // Input area with autocomplete
+            ZStack(alignment: .bottom) {
+                VStack(spacing: 0) {
+                    if showAutocomplete {
+                        NoteAutocompletePopup(
+                            noteService: noteService,
+                            query: autocompleteQuery,
+                            selectedIndex: $autocompleteSelectedIndex,
+                            onSelect: { note in
+                                insertNoteReference(note)
+                            },
+                            onDismiss: {
+                                showAutocomplete = false
+                            }
+                        )
+                    }
+
+                    InputArea(
+                        inputText: $inputText,
+                        isInputFocused: _isInputFocused,
+                        isLoading: claudeService.isLoading,
+                        onSend: sendMessage
+                    )
+                }
+            }
+            .onChange(of: inputText) { newValue in
+                updateAutocomplete(text: newValue)
+            }
         }
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy) {
         withAnimation(.easeOut(duration: 0.2)) {
-            if claudeService.isLoading {
-                proxy.scrollTo("streaming", anchor: .bottom)
-            } else if let lastMessage = historyService.currentSession.messages.last {
-                proxy.scrollTo(lastMessage.id, anchor: .bottom)
+            proxy.scrollTo("bottom", anchor: .bottom)
+        }
+    }
+
+    private func handleCommandPaletteSelection(_ item: CommandPaletteItem) {
+        commandPaletteService.dismiss()
+
+        switch item.type {
+        case .action:
+            switch item.action {
+            case .newChat:
+                appMode = .chat
+                historyService.newSession()
+                claudeService.resetConversation()
+                isInputFocused = true
+            case .newNote:
+                appMode = .notepad
+                noteService.newNote()
+            case .none:
+                break
+            }
+        case .note:
+            if let note = item.note {
+                appMode = .notepad
+                noteService.loadNote(note)
+            }
+        case .chat:
+            if let session = item.session {
+                appMode = .chat
+                historyService.loadSession(session)
+                claudeService.resetConversation()
+                isInputFocused = true
             }
         }
+    }
+
+    private func cycleMode() {
+        switch appMode {
+        case .chat:
+            appMode = .notepad
+        case .notepad:
+            noteService.saveCurrentNote()
+            appMode = .chat
+            isInputFocused = true
+        }
+    }
+
+    // MARK: - Autocomplete
+
+    private func updateAutocomplete(text: String) {
+        // Find the last @ that might be starting a reference
+        guard let atRange = findActiveAtSymbol(in: text) else {
+            showAutocomplete = false
+            autocompleteQuery = ""
+            return
+        }
+
+        let query = String(text[atRange])
+        autocompleteQuery = query
+        autocompleteSelectedIndex = 0
+
+        let results = noteService.searchNotes(query: query)
+        showAutocomplete = !results.isEmpty
+    }
+
+    private func findActiveAtSymbol(in text: String) -> Range<String.Index>? {
+        // Look for @ followed by non-whitespace chars that haven't been "closed" with a quote
+        // Pattern: @sometext (not inside an existing @"..." reference)
+        guard let atIndex = text.lastIndex(of: "@") else { return nil }
+
+        let afterAt = text[text.index(after: atIndex)...]
+
+        // If there's a closing quote already, this reference is complete
+        if afterAt.hasPrefix("\"") {
+            // Check if the quoted reference is closed
+            let afterQuote = afterAt.dropFirst()
+            if afterQuote.contains("\"") {
+                return nil  // Closed reference
+            }
+            // Open quoted reference - use content after the quote as query
+            let queryStart = text.index(atIndex, offsetBy: 2)
+            if queryStart < text.endIndex {
+                return queryStart..<text.endIndex
+            }
+            return nil
+        }
+
+        // Unquoted @ - use text after @ as query
+        let queryStart = text.index(after: atIndex)
+        if queryStart <= text.endIndex && queryStart != text.endIndex {
+            // Don't show autocomplete if there's a space right after @
+            let queryText = text[queryStart...]
+            if queryText.isEmpty { return nil }
+            return queryStart..<text.endIndex
+        }
+
+        return nil
+    }
+
+    private func insertNoteReference(_ note: Note) {
+        // Find the @ symbol and replace everything from @ to cursor with @"Title"
+        if let atIndex = inputText.lastIndex(of: "@") {
+            let before = inputText[..<atIndex]
+            inputText = before + "@\"\(note.title)\" "
+        }
+        showAutocomplete = false
+    }
+
+    // MARK: - Note Context Extraction
+
+    private func extractNoteContext(from text: String) -> String? {
+        // Parse @"Title" references
+        let pattern = #"@"([^"]+)""#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+
+        let nsText = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
+
+        var contextParts: [String] = []
+
+        for match in matches {
+            if let titleRange = Range(match.range(at: 1), in: text) {
+                let title = String(text[titleRange])
+                // Find the note by title
+                if let note = noteService.notes.first(where: { $0.title == title }) {
+                    contextParts.append("--- Note: \(note.title) ---\n\(note.content)")
+                }
+            }
+        }
+
+        return contextParts.isEmpty ? nil : contextParts.joined(separator: "\n\n")
     }
 
     private func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
+        // Extract note context from @"Title" references
+        let noteContext = extractNoteContext(from: text)
+
         let userMessage = ChatMessage(role: .user, content: text)
         historyService.addMessageToCurrentSession(userMessage)
         inputText = ""
         streamingText = ""
         isWorking = false
+        showAutocomplete = false
 
         Task {
             var addedMessages = Set<String>()
 
-            let responses = await claudeService.sendMessage(text) { update in
+            let responses = await claudeService.sendMessage(text, noteContext: noteContext) { update in
                 streamingText = update.text
                 isWorking = update.isWorking
 
@@ -148,16 +470,33 @@ struct ContentView: View {
 
             streamingText = ""
             isWorking = false
+
+            // Generate AI title after first assistant response
+            if !historyService.currentSession.titleGenerated {
+                let messages = historyService.currentSession.messages
+                if let firstUser = messages.first(where: { $0.role == .user }),
+                   let firstAssistant = messages.first(where: { $0.role == .assistant }) {
+                    let context = firstUser.content + "\n\n" + firstAssistant.content
+                    Task {
+                        if let title = await titleService.generateTitle(for: context) {
+                            historyService.currentSession.title = title
+                            historyService.currentSession.titleGenerated = true
+                            historyService.saveCurrentSession()
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
-// MARK: - Header
+// MARK: - Unified Header
 
-struct ChatHeader: View {
+struct UnifiedHeader: View {
     @Binding var showHistory: Bool
     @Binding var showSettings: Bool
-    let onNewChat: () -> Void
+    @Binding var appMode: AppMode
+    let onNew: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -167,15 +506,11 @@ struct ChatHeader: View {
                     .foregroundColor(showHistory ? .accentColor : .secondary)
             }
             .buttonStyle(.plain)
-            .help("Toggle history")
-
-            Text("Claude Chat")
-                .font(.headline)
-                .foregroundColor(.secondary)
+            .help("Toggle sidebar")
 
             Spacer()
 
-            Button(action: onNewChat) {
+            Button(action: onNew) {
                 HStack(spacing: 4) {
                     Image(systemName: "plus")
                     Text("New")
@@ -188,7 +523,7 @@ struct ChatHeader: View {
                 .cornerRadius(6)
             }
             .buttonStyle(.plain)
-            .help("Start new chat")
+            .help(appMode == .chat ? "Start new chat" : "Create new note")
 
             Button(action: { showSettings = true }) {
                 Image(systemName: "gearshape")
@@ -201,6 +536,31 @@ struct ChatHeader: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Color(NSColor.windowBackgroundColor))
+    }
+}
+
+struct ModeChip: View {
+    let label: String
+    let icon: String
+    let isActive: Bool
+    let color: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .medium))
+                Text(label)
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundColor(isActive ? color : .secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(isActive ? color.opacity(0.15) : Color.clear)
+            .cornerRadius(6)
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -534,20 +894,20 @@ struct InputArea: View {
 extension MarkdownUI.Theme {
     static let custom = Theme()
         .text {
-            FontSize(13)
+            FontSize(15)
             ForegroundColor(.primary)
         }
         .code {
             FontFamilyVariant(.monospaced)
-            FontSize(12)
+            FontSize(13)
             BackgroundColor(Color(NSColor.controlBackgroundColor))
         }
         .codeBlock { configuration in
             ScrollView(.horizontal, showsIndicators: false) {
                 configuration.label
                     .fontDesign(.monospaced)
-                    .font(.system(size: 12))
-                    .padding(12)
+                    .font(.system(size: 13))
+                    .padding(14)
             }
             .background(Color(NSColor.controlBackgroundColor))
             .cornerRadius(8)
@@ -558,13 +918,21 @@ extension MarkdownUI.Theme {
         }
         .heading1 { configuration in
             configuration.label
-                .markdownMargin(top: 16, bottom: 8)
+                .markdownMargin(top: 20, bottom: 10)
                 .markdownTextStyle {
                     FontWeight(.bold)
-                    FontSize(20)
+                    FontSize(24)
                 }
         }
         .heading2 { configuration in
+            configuration.label
+                .markdownMargin(top: 16, bottom: 8)
+                .markdownTextStyle {
+                    FontWeight(.semibold)
+                    FontSize(20)
+                }
+        }
+        .heading3 { configuration in
             configuration.label
                 .markdownMargin(top: 12, bottom: 6)
                 .markdownTextStyle {
@@ -572,22 +940,39 @@ extension MarkdownUI.Theme {
                     FontSize(17)
                 }
         }
-        .heading3 { configuration in
-            configuration.label
-                .markdownMargin(top: 8, bottom: 4)
-                .markdownTextStyle {
-                    FontWeight(.semibold)
-                    FontSize(15)
-                }
-        }
         .listItem { configuration in
             configuration.label
-                .markdownMargin(top: 4)
+                .markdownMargin(top: 6)
         }
         .paragraph { configuration in
             configuration.label
-                .markdownMargin(top: 0, bottom: 8)
+                .markdownMargin(top: 0, bottom: 12)
         }
+}
+
+// MARK: - Scroll Helpers
+
+struct ScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+struct ScrollProxyHolder: View {
+    let proxy: ScrollViewProxy
+    @Binding var trigger: Bool
+
+    var body: some View {
+        Color.clear
+            .onChange(of: trigger) { newValue in
+                if !newValue {
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
+                }
+            }
+    }
 }
 
 #Preview {

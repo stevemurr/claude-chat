@@ -15,6 +15,8 @@ A lightweight macOS app for quick Q&A with Claude via the Claude Code CLI. Summo
 - **Conversation History**: Browse and resume past conversations
 - **Floating Window**: Stays above other windows when focused
 - **No Dock Icon**: Runs as a menu bar agent
+- **Notepad**: Rich text notes with Tiptap editor, AI-generated titles, and local persistence
+- **Command Palette**: Fuzzy search across notes and chat history (`Cmd+K`)
 
 ## Requirements
 
@@ -86,6 +88,7 @@ For the global hotkey to work when other apps are focused, you need to grant acc
 | Send message | `Enter` |
 | Newline in message | `Shift+Enter` |
 | Hide window | `Escape` |
+| Command palette | `Cmd+K` |
 
 ## Configuration
 
@@ -100,11 +103,22 @@ Click the gear icon in the header to access settings:
 ClaudeChat/
 ├── ClaudeChatApp.swift      # App entry point
 ├── AppDelegate.swift        # Hotkey registration, window management
-├── ContentView.swift        # Main chat UI
+├── ContentView.swift        # Main chat UI with tab switching
 ├── ChatMessage.swift        # Message model
 ├── ChatSession.swift        # Session model and history
 ├── ClaudeService.swift      # Claude CLI subprocess wrapper
-└── SettingsView.swift       # Settings UI and manager
+├── SettingsView.swift       # Settings UI and manager
+├── Note.swift               # Note model with block support
+├── Block.swift              # Block-based content model
+├── NoteService.swift        # Note persistence and management
+├── NotepadView.swift        # Notes sidebar and content view
+├── TiptapEditorView.swift   # WKWebView wrapper for Tiptap
+├── TitleService.swift       # AI-powered title generation
+├── CommandPalette.swift     # Fuzzy search service
+├── CommandPaletteView.swift # Search overlay UI
+└── Resources/
+    ├── tiptap-editor.html   # Editor HTML template
+    └── tiptap-bundle.js     # Bundled Tiptap editor
 ```
 
 ## How It Works

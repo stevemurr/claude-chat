@@ -837,12 +837,15 @@ struct InputArea: View {
     var onEscape: () -> Void = {}
     var shouldInterceptKeys: () -> Bool = { false }
 
+    @State private var textHeight: CGFloat = 22
+
     var body: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            HStack(alignment: .center, spacing: 8) {
+            HStack(alignment: .bottom, spacing: 8) {
                 ChatInputField(
                     text: $inputText,
                     placeholder: "Ask Claude...",
+                    textHeight: $textHeight,
                     onSubmit: onSend,
                     onTab: onTab,
                     onArrowUp: onArrowUp,
@@ -850,24 +853,25 @@ struct InputArea: View {
                     onEscape: onEscape,
                     shouldInterceptKeys: shouldInterceptKeys
                 )
-                .frame(minHeight: 20, maxHeight: 150)
+                .frame(height: min(max(textHeight, 22), 150))
 
                 Button(action: onSend) {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 20))
+                        .font(.system(size: 22))
                         .foregroundColor(inputText.isEmpty || isLoading ? .secondary.opacity(0.4) : .accentColor)
                 }
                 .buttonStyle(.plain)
                 .disabled(inputText.isEmpty || isLoading)
+                .padding(.bottom, 1)
             }
-            .padding(.leading, 16)
-            .padding(.trailing, 6)
-            .padding(.vertical, 6)
+            .padding(.leading, 12)
+            .padding(.trailing, 8)
+            .padding(.vertical, 8)
             .background(Color(NSColor.controlBackgroundColor))
-            .cornerRadius(8)
+            .cornerRadius(20)
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color(NSColor.separatorColor).opacity(0.6), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: 1)
             )
         }
         .padding(12)
@@ -966,6 +970,7 @@ struct ScrollProxyHolder: View {
 struct ChatInputField: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String
+    @Binding var textHeight: CGFloat
     var onSubmit: () -> Void
     var onTab: () -> Void
     var onArrowUp: () -> Void
@@ -988,10 +993,10 @@ struct ChatInputField: NSViewRepresentable {
         let textView = ChatTextView()
         textView.delegate = context.coordinator
         textView.isRichText = false
-        textView.font = .systemFont(ofSize: 14)
+        textView.font = .systemFont(ofSize: 15)
         textView.backgroundColor = .clear
         textView.drawsBackground = false
-        textView.textContainerInset = NSSize(width: 0, height: 0)
+        textView.textContainerInset = NSSize(width: 0, height: 2)
         textView.textContainer?.lineFragmentPadding = 0
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
@@ -1006,9 +1011,19 @@ struct ChatInputField: NSViewRepresentable {
         textView.onArrowDownKey = { context.coordinator.handleArrowDown() }
         textView.onEscapeKey = { context.coordinator.handleEscape() }
         textView.shouldInterceptKeys = { context.coordinator.parent.shouldInterceptKeys() }
+        textView.onHeightChange = { height in
+            DispatchQueue.main.async {
+                context.coordinator.parent.textHeight = height
+            }
+        }
 
         scrollView.documentView = textView
         context.coordinator.textView = textView
+
+        // Initial height calculation
+        DispatchQueue.main.async {
+            context.coordinator.updateHeight()
+        }
 
         return scrollView
     }
@@ -1018,6 +1033,7 @@ struct ChatInputField: NSViewRepresentable {
 
         if textView.string != text {
             textView.string = text
+            context.coordinator.updateHeight()
         }
 
         // Update placeholder visibility
@@ -1038,6 +1054,23 @@ struct ChatInputField: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
+            updateHeight()
+        }
+
+        func updateHeight() {
+            guard let textView = textView,
+                  let layoutManager = textView.layoutManager,
+                  let textContainer = textView.textContainer else { return }
+
+            layoutManager.ensureLayout(for: textContainer)
+            let usedRect = layoutManager.usedRect(for: textContainer)
+            let newHeight = usedRect.height + textView.textContainerInset.height * 2
+
+            if abs(newHeight - parent.textHeight) > 1 {
+                DispatchQueue.main.async {
+                    self.parent.textHeight = newHeight
+                }
+            }
         }
 
         func handleTab() -> Bool {
@@ -1075,6 +1108,7 @@ class ChatTextView: NSTextView {
     var onArrowDownKey: (() -> Bool)?
     var onEscapeKey: (() -> Bool)?
     var shouldInterceptKeys: (() -> Bool)?
+    var onHeightChange: ((CGFloat) -> Void)?
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -1083,9 +1117,10 @@ class ChatTextView: NSTextView {
         if string.isEmpty && !placeholderString.isEmpty {
             let attrs: [NSAttributedString.Key: Any] = [
                 .foregroundColor: NSColor.placeholderTextColor,
-                .font: font ?? NSFont.systemFont(ofSize: 14)
+                .font: font ?? NSFont.systemFont(ofSize: 15)
             ]
-            let rect = NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height)
+            let inset = textContainerInset
+            let rect = NSRect(x: inset.width, y: inset.height, width: bounds.width - inset.width * 2, height: bounds.height - inset.height * 2)
             placeholderString.draw(in: rect, withAttributes: attrs)
         }
     }

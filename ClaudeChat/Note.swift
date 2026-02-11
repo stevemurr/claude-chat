@@ -108,6 +108,13 @@ struct Note: Identifiable, Codable {
 
     /// Check if the note is effectively empty
     var isEmpty: Bool {
-        return content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let contentEmpty = content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if !contentEmpty { return false }
+        // Also check blocks for legacy notes where content may not be synced yet
+        if let blocks = blocks,
+           blocks.contains(where: { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            return false
+        }
+        return true
     }
 }

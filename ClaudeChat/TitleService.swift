@@ -44,9 +44,10 @@ class TitleService: ObservableObject {
             let decoder = JSONDecoder()
             var resultText = ""
 
-            while process.isRunning || fileHandle.availableData.count > 0 {
+            while true {
                 let data = fileHandle.availableData
                 if data.isEmpty {
+                    if !process.isRunning { break }
                     try? await Task.sleep(nanoseconds: 50_000_000)
                     continue
                 }

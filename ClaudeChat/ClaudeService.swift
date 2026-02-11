@@ -103,6 +103,10 @@ class ClaudeService: ObservableObject {
         }
         process.environment = env
 
+        await MainActor.run {
+            self.currentProcess = process
+        }
+
         do {
             try process.run()
 
@@ -112,9 +116,10 @@ class ClaudeService: ObservableObject {
             let decoder = JSONDecoder()
 
             // Read stream incrementally
-            while process.isRunning || fileHandle.availableData.count > 0 {
+            while true {
                 let data = fileHandle.availableData
                 if data.isEmpty {
+                    if !process.isRunning { break }
                     try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
                     continue
                 }

@@ -3,9 +3,140 @@ import StarterKit from '@tiptap/starter-kit'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import Placeholder from '@tiptap/extension-placeholder'
+import Table from '@tiptap/extension-table'
+import TableRow from '@tiptap/extension-table-row'
+import TableCell from '@tiptap/extension-table-cell'
+import TableHeader from '@tiptap/extension-table-header'
 import { Markdown } from 'tiptap-markdown'
 import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
+
+// --- Table Context Menu ---
+
+let tableMenuEl = null
+let tableMenuVisible = false
+
+const tableMenuCommands = [
+  { type: 'addRowBefore', title: 'Insert Row Above', icon: '\u2191', section: 'row' },
+  { type: 'addRowAfter', title: 'Insert Row Below', icon: '\u2193', section: 'row' },
+  { type: 'deleteRow', title: 'Delete Row', icon: '\u2212', section: 'row' },
+  { type: 'divider1', section: 'divider' },
+  { type: 'addColumnBefore', title: 'Insert Column Left', icon: '\u2190', section: 'column' },
+  { type: 'addColumnAfter', title: 'Insert Column Right', icon: '\u2192', section: 'column' },
+  { type: 'deleteColumn', title: 'Delete Column', icon: '\u2212', section: 'column' },
+  { type: 'divider2', section: 'divider' },
+  { type: 'toggleHeaderRow', title: 'Toggle Header Row', icon: 'H', section: 'header' },
+  { type: 'toggleHeaderColumn', title: 'Toggle Header Column', icon: 'H', section: 'header' },
+  { type: 'divider3', section: 'divider' },
+  { type: 'deleteTable', title: 'Delete Table', icon: '\u2717', section: 'table' },
+]
+
+function createTableMenu() {
+  tableMenuEl = document.createElement('div')
+  tableMenuEl.className = 'table-menu'
+  tableMenuEl.style.display = 'none'
+  document.body.appendChild(tableMenuEl)
+}
+
+function renderTableMenu() {
+  tableMenuEl.innerHTML = tableMenuCommands.map((cmd) => {
+    if (cmd.section === 'divider') {
+      return '<div class="table-menu-divider"></div>'
+    }
+    return `<div class="table-menu-item" data-type="${cmd.type}">
+      <span class="table-menu-icon">${cmd.icon}</span>
+      <span class="table-menu-title">${cmd.title}</span>
+    </div>`
+  }).join('')
+
+  // Add click handlers
+  tableMenuEl.querySelectorAll('.table-menu-item').forEach(el => {
+    el.addEventListener('mousedown', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      executeTableCommand(el.dataset.type)
+    })
+  })
+}
+
+function showTableMenu(x, y) {
+  tableMenuVisible = true
+  renderTableMenu()
+
+  // Position menu at cursor, but keep within viewport
+  const menuWidth = 200
+  const menuHeight = tableMenuEl.offsetHeight || 300
+  const viewportWidth = window.innerWidth
+  const viewportHeight = window.innerHeight
+
+  let left = x
+  let top = y
+
+  if (x + menuWidth > viewportWidth) {
+    left = viewportWidth - menuWidth - 8
+  }
+  if (y + menuHeight > viewportHeight) {
+    top = viewportHeight - menuHeight - 8
+  }
+
+  tableMenuEl.style.left = `${left}px`
+  tableMenuEl.style.top = `${top}px`
+  tableMenuEl.style.display = 'block'
+}
+
+function hideTableMenu() {
+  tableMenuVisible = false
+  if (tableMenuEl) {
+    tableMenuEl.style.display = 'none'
+  }
+}
+
+function executeTableCommand(type) {
+  const editor = window._editor
+  if (!editor) return
+
+  switch (type) {
+    case 'addRowBefore':
+      editor.chain().focus().addRowBefore().run()
+      break
+    case 'addRowAfter':
+      editor.chain().focus().addRowAfter().run()
+      break
+    case 'deleteRow':
+      editor.chain().focus().deleteRow().run()
+      break
+    case 'addColumnBefore':
+      editor.chain().focus().addColumnBefore().run()
+      break
+    case 'addColumnAfter':
+      editor.chain().focus().addColumnAfter().run()
+      break
+    case 'deleteColumn':
+      editor.chain().focus().deleteColumn().run()
+      break
+    case 'toggleHeaderRow':
+      editor.chain().focus().toggleHeaderRow().run()
+      break
+    case 'toggleHeaderColumn':
+      editor.chain().focus().toggleHeaderColumn().run()
+      break
+    case 'deleteTable':
+      editor.chain().focus().deleteTable().run()
+      break
+  }
+
+  hideTableMenu()
+}
+
+function isInTable(view, pos) {
+  const $pos = view.state.doc.resolve(pos)
+  for (let d = $pos.depth; d > 0; d--) {
+    if ($pos.node(d).type.name === 'table') {
+      return true
+    }
+  }
+  return false
+}
 
 // --- Slash Command Menu (pure DOM, driven by a Tiptap plugin) ---
 
@@ -20,6 +151,7 @@ const slashCommands = [
   { type: 'blockquote', title: 'Quote', icon: '\u201C', keywords: ['blockquote', 'quote'] },
   { type: 'codeBlock', title: 'Code', icon: '</>', keywords: ['snippet', 'pre', 'mono', 'code'] },
   { type: 'horizontalRule', title: 'Divider', icon: '\u2014', keywords: ['hr', 'line', 'separator', 'divider'] },
+  { type: 'table', title: 'Table', icon: '\u2637', keywords: ['table', 'grid', 'rows', 'columns', 'cells'] },
 ]
 
 let slashMenuEl = null
@@ -134,6 +266,9 @@ function executeSlashCommand(cmd) {
       break
     case 'horizontalRule':
       editor.chain().focus().setHorizontalRule().run()
+      break
+    case 'table':
+      editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
       break
   }
 
@@ -345,6 +480,36 @@ function serializeNode(node, context) {
     case 'hardBreak':
       return '\n'
 
+    case 'table': {
+      const rows = node.content || []
+      if (rows.length === 0) return ''
+
+      const serializedRows = rows.map((row, rowIndex) => {
+        const cells = row.content || []
+        const cellContents = cells.map(cell => {
+          const cellText = (cell.content || []).map(c => serializeNode(c, context)).join('').trim()
+          return cellText || ' '
+        })
+        return '| ' + cellContents.join(' | ') + ' |'
+      })
+
+      // Insert separator after header row (first row)
+      if (serializedRows.length > 0) {
+        const firstRow = rows[0]
+        const numCols = (firstRow.content || []).length
+        const separator = '| ' + Array(numCols).fill('---').join(' | ') + ' |'
+        serializedRows.splice(1, 0, separator)
+      }
+
+      return serializedRows.join('\n')
+    }
+
+    case 'tableRow':
+    case 'tableCell':
+    case 'tableHeader':
+      // These are handled by the table case
+      return ''
+
     default:
       // Fallback: serialize children or inline content
       if (node.content) {
@@ -387,10 +552,71 @@ function editorToMarkdown(editor) {
   return serializeChildren(json.content, {})
 }
 
+// --- Table Markdown Fix Extension ---
+// Fixes markdown table parsing by unwrapping <thead> and <tbody> elements
+// that markdown-it generates but Tiptap's Table schema doesn't expect
+
+const TableMarkdownFix = Extension.create({
+  name: 'tableMarkdownFix',
+
+  addStorage() {
+    return {
+      markdown: {
+        parse: {
+          updateDOM(element) {
+            // Find all tables and unwrap thead/tbody so tr elements are direct children
+            element.querySelectorAll('table').forEach(table => {
+              ['thead', 'tbody', 'tfoot'].forEach(tag => {
+                const wrapper = table.querySelector(tag)
+                if (wrapper) {
+                  // Move all children (tr elements) to be direct children of table
+                  while (wrapper.firstChild) {
+                    table.insertBefore(wrapper.firstChild, wrapper)
+                  }
+                  wrapper.remove()
+                }
+              })
+            })
+          }
+        }
+      }
+    }
+  }
+})
+
+// --- Table Context Menu Extension ---
+
+const TableContextMenu = Extension.create({
+  name: 'tableContextMenu',
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('tableContextMenu'),
+        props: {
+          handleDOMEvents: {
+            contextmenu(view, event) {
+              // Check if right-click is inside a table
+              const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })
+              if (pos && isInTable(view, pos.pos)) {
+                event.preventDefault()
+                showTableMenu(event.clientX, event.clientY)
+                return true
+              }
+              return false
+            },
+          },
+        },
+      }),
+    ]
+  },
+})
+
 // --- Initialize editor ---
 
 function initEditor() {
   createSlashMenu()
+  createTableMenu()
 
   const editor = new Editor({
     element: document.getElementById('editor'),
@@ -410,8 +636,19 @@ function initEditor() {
         transformCopiedText: true,
         transformPastedText: true,
       }),
+      Table.configure({
+        resizable: true,
+        HTMLAttributes: {
+          class: 'tiptap-table',
+        },
+      }),
+      TableRow,
+      TableHeader,
+      TableCell,
+      TableMarkdownFix,
       SlashCommands,
       TodoInputRule,
+      TableContextMenu,
     ],
     autofocus: true,
     editorProps: {
@@ -461,10 +698,20 @@ function initEditor() {
   }
 }
 
-// Handle click outside slash menu to dismiss
+// Handle click outside menus to dismiss
 document.addEventListener('click', (e) => {
   if (slashMenuVisible && slashMenuEl && !slashMenuEl.contains(e.target)) {
     hideSlashMenu()
+  }
+  if (tableMenuVisible && tableMenuEl && !tableMenuEl.contains(e.target)) {
+    hideTableMenu()
+  }
+})
+
+// Handle escape key to dismiss table menu
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && tableMenuVisible) {
+    hideTableMenu()
   }
 })
 

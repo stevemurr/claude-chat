@@ -8,9 +8,11 @@ struct ClaudeChatApp: App {
         WindowGroup {
             ContentView()
         }
-        .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 600, height: 500)
+        .windowStyle(.automatic)
+        .windowToolbarStyle(.unified)
+        .defaultSize(width: 700, height: 550)
         .commands {
+            SidebarCommands()
             CommandGroup(replacing: .newItem) { }
         }
     }

@@ -1,7 +1,7 @@
 import SwiftUI
 import MarkdownUI
 
-enum AppMode {
+enum AppMode: Hashable {
     case chat
     case notepad
 }
@@ -13,7 +13,6 @@ struct ContentView: View {
     @StateObject private var commandPaletteService = CommandPaletteService()
     @StateObject private var titleService = TitleService()
     @State private var inputText = ""
-    @State private var showHistory = false
     @State private var showSettings = false
     @State private var streamingText = ""
     @State private var isWorking = false
@@ -23,80 +22,26 @@ struct ContentView: View {
     @State private var showAutocomplete = false
     @State private var autocompleteQuery = ""
     @State private var autocompleteSelectedIndex = 0
+    @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+    @State private var selectedSessionID: UUID?
+    @State private var selectedNoteID: UUID?
     @FocusState private var isInputFocused: Bool
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Sidebar - conditional based on mode
-            if showHistory {
-                Group {
-                    switch appMode {
-                    case .chat:
-                        HistorySidebar(historyService: historyService, showHistory: $showHistory)
-                    case .notepad:
-                        NoteSidebar(noteService: noteService)
-                    }
-                }
-                .frame(width: 220)
-
-                Divider()
-            }
-
-            // Main content area
-            VStack(spacing: 0) {
-                // Unified Header
-                UnifiedHeader(
-                    showHistory: $showHistory,
-                    showSettings: $showSettings,
-                    appMode: $appMode,
-                    onNew: {
-                        switch appMode {
-                        case .chat:
-                            historyService.newSession()
-                            claudeService.resetConversation()
-                        case .notepad:
-                            noteService.newNote()
-                        }
-                    }
-                )
-
-                Divider()
-
-                // Content area - conditional based on mode
-                switch appMode {
-                case .chat:
-                    chatContent
-
-                case .notepad:
-                    NotepadContentView(noteService: noteService, titleService: titleService)
-                }
-
-                // Bottom mode bar
-                HStack {
-                    Spacer()
-                    HStack(spacing: 2) {
-                        ModeChip(label: "Chat", icon: "bubble.left.fill",
-                                 isActive: appMode == .chat, color: .orange) { appMode = .chat }
-                        ModeChip(label: "Notes", icon: "doc.text",
-                                 isActive: appMode == .notepad, color: .blue) { appMode = .notepad }
-                    }
-                    .padding(3)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.8))
-                    .cornerRadius(8)
-                    Spacer()
-                }
-                .padding(.vertical, 6)
-                .background(appMode == .chat ? Color.orange.opacity(0.06) : Color.blue.opacity(0.06))
-                .overlay(alignment: .top) {
-                    (appMode == .chat ? Color.orange : Color.blue).opacity(0.2).frame(height: 1)
-                }
-            }
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebarContent
+                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 300)
+        } detail: {
+            detailContent
         }
+        .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 500, minHeight: 400)
-        .background(Color(NSColor.textBackgroundColor))
         .onAppear {
             isInputFocused = true
             commandPaletteService.configure(noteService: noteService, historyService: historyService)
+            // Sync initial selection
+            selectedSessionID = historyService.currentSession.id
+            selectedNoteID = noteService.currentNote.id
         }
         .onReceive(NotificationCenter.default.publisher(for: .focusInput)) { _ in
             isInputFocused = true
@@ -105,14 +50,17 @@ struct ContentView: View {
             if appMode == .chat {
                 historyService.newSession()
                 claudeService.resetConversation()
+                selectedSessionID = historyService.currentSession.id
                 isInputFocused = true
             } else {
                 noteService.newNote()
+                selectedNoteID = noteService.currentNote.id
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .newNote)) { _ in
             appMode = .notepad
             noteService.newNote()
+            selectedNoteID = noteService.currentNote.id
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleMode)) { _ in
             cycleMode()
@@ -130,6 +78,23 @@ struct ContentView: View {
                 noteService.saveCurrentNote()
             }
         }
+        .onChange(of: selectedSessionID) { newID in
+            guard let newID = newID else { return }
+            if newID != historyService.currentSession.id {
+                if let session = historyService.sessions.first(where: { $0.id == newID }) {
+                    historyService.loadSession(session)
+                    claudeService.resetConversation()
+                }
+            }
+        }
+        .onChange(of: selectedNoteID) { newID in
+            guard let newID = newID else { return }
+            if newID != noteService.currentNote.id {
+                if let note = noteService.notes.first(where: { $0.id == newID }) {
+                    noteService.loadNote(note)
+                }
+            }
+        }
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
@@ -137,7 +102,8 @@ struct ContentView: View {
             if commandPaletteService.isVisible {
                 ZStack(alignment: .top) {
                     // Backdrop
-                    Color.black.opacity(0.45)
+                    Color.black.opacity(0.25)
+                        .background(.ultraThinMaterial)
                         .ignoresSafeArea()
                         .onTapGesture {
                             commandPaletteService.dismiss()
@@ -154,6 +120,153 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Sidebar Content
+
+    @ViewBuilder
+    private var sidebarContent: some View {
+        VStack(spacing: 0) {
+            // Mode switcher in sidebar header
+            sidebarHeader
+
+            Divider()
+
+            // Sidebar list based on mode
+            switch appMode {
+            case .chat:
+                chatSidebarList
+            case .notepad:
+                noteSidebarList
+            }
+        }
+        .background(Color(NSColor.windowBackgroundColor).opacity(0.5))
+    }
+
+    private var sidebarHeader: some View {
+        VStack(spacing: 12) {
+            // Mode Picker
+            Picker("Mode", selection: $appMode) {
+                Label("Chat", systemImage: "bubble.left.fill")
+                    .tag(AppMode.chat)
+                Label("Notes", systemImage: "doc.text")
+                    .tag(AppMode.notepad)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            // New button
+            Button(action: {
+                switch appMode {
+                case .chat:
+                    historyService.newSession()
+                    claudeService.resetConversation()
+                    selectedSessionID = historyService.currentSession.id
+                    isInputFocused = true
+                case .notepad:
+                    noteService.newNote()
+                    selectedNoteID = noteService.currentNote.id
+                }
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "plus")
+                    Text(appMode == .chat ? "New Chat" : "New Note")
+                }
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.accentColor)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .background(Color.accentColor.opacity(0.1))
+                .cornerRadius(6)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+    }
+
+    private var chatSidebarList: some View {
+        List(selection: $selectedSessionID) {
+            ForEach(historyService.sessions) { session in
+                SessionRowView(session: session, isSelected: session.id == selectedSessionID)
+                    .tag(session.id)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            historyService.deleteSession(session)
+                            if selectedSessionID == session.id {
+                                selectedSessionID = historyService.currentSession.id
+                            }
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+            }
+        }
+        .listStyle(.sidebar)
+    }
+
+    private var noteSidebarList: some View {
+        List(selection: $selectedNoteID) {
+            ForEach(noteService.notes) { note in
+                NoteRowView(note: note, isSelected: note.id == selectedNoteID)
+                    .tag(note.id)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            noteService.deleteNote(note)
+                            if selectedNoteID == note.id {
+                                selectedNoteID = noteService.currentNote.id
+                            }
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+            }
+        }
+        .listStyle(.sidebar)
+    }
+
+    // MARK: - Detail Content
+
+    @ViewBuilder
+    private var detailContent: some View {
+        VStack(spacing: 0) {
+            // Detail header with settings
+            detailHeader
+
+            Divider()
+
+            // Content area - conditional based on mode
+            switch appMode {
+            case .chat:
+                chatContent
+
+            case .notepad:
+                NotepadContentView(noteService: noteService, titleService: titleService)
+            }
+        }
+        .background(Color(NSColor.textBackgroundColor))
+    }
+
+    private var detailHeader: some View {
+        HStack(spacing: 12) {
+            // Current item title
+            Text(appMode == .chat ? historyService.currentSession.title : noteService.currentNote.title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.primary)
+                .lineLimit(1)
+
+            Spacer()
+
+            Button(action: { showSettings = true }) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Settings")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color(NSColor.windowBackgroundColor))
     }
 
     // MARK: - Chat Content (extracted from body)
@@ -280,7 +393,12 @@ struct ContentView: View {
                         inputText: $inputText,
                         isInputFocused: _isInputFocused,
                         isLoading: claudeService.isLoading,
-                        onSend: sendMessage
+                        onSend: sendMessage,
+                        onTab: { selectCurrentAutocomplete() },
+                        onArrowUp: { moveAutocompleteSelection(by: -1) },
+                        onArrowDown: { moveAutocompleteSelection(by: 1) },
+                        onEscape: { showAutocomplete = false },
+                        shouldInterceptKeys: { showAutocomplete }
                     )
                 }
             }
@@ -306,10 +424,12 @@ struct ContentView: View {
                 appMode = .chat
                 historyService.newSession()
                 claudeService.resetConversation()
+                selectedSessionID = historyService.currentSession.id
                 isInputFocused = true
             case .newNote:
                 appMode = .notepad
                 noteService.newNote()
+                selectedNoteID = noteService.currentNote.id
             case .none:
                 break
             }
@@ -317,12 +437,14 @@ struct ContentView: View {
             if let note = item.note {
                 appMode = .notepad
                 noteService.loadNote(note)
+                selectedNoteID = note.id
             }
         case .chat:
             if let session = item.session {
                 appMode = .chat
                 historyService.loadSession(session)
                 claudeService.resetConversation()
+                selectedSessionID = session.id
                 isInputFocused = true
             }
         }
@@ -398,6 +520,22 @@ struct ContentView: View {
             inputText = before + "@\"\(note.title)\" "
         }
         showAutocomplete = false
+    }
+
+    private var autocompleteResults: [Note] {
+        Array(noteService.searchNotes(query: autocompleteQuery).prefix(5))
+    }
+
+    private func moveAutocompleteSelection(by delta: Int) {
+        let results = autocompleteResults
+        guard !results.isEmpty else { return }
+        autocompleteSelectedIndex = (autocompleteSelectedIndex + delta + results.count) % results.count
+    }
+
+    private func selectCurrentAutocomplete() {
+        let results = autocompleteResults
+        guard autocompleteSelectedIndex < results.count else { return }
+        insertNoteReference(results[autocompleteSelectedIndex])
     }
 
     // MARK: - Note Context Extraction
@@ -490,159 +628,50 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Unified Header
+// MARK: - Session Row View (for native List)
 
-struct UnifiedHeader: View {
-    @Binding var showHistory: Bool
-    @Binding var showSettings: Bool
-    @Binding var appMode: AppMode
-    let onNew: () -> Void
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Button(action: { showHistory.toggle() }) {
-                Image(systemName: "sidebar.left")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(showHistory ? .accentColor : .secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Toggle sidebar")
-
-            Spacer()
-
-            Button(action: onNew) {
-                HStack(spacing: 4) {
-                    Image(systemName: "plus")
-                    Text("New")
-                }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Color(NSColor.controlBackgroundColor))
-                .cornerRadius(6)
-            }
-            .buttonStyle(.plain)
-            .help(appMode == .chat ? "Start new chat" : "Create new note")
-
-            Button(action: { showSettings = true }) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Settings")
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color(NSColor.windowBackgroundColor))
-    }
-}
-
-struct ModeChip: View {
-    let label: String
-    let icon: String
-    let isActive: Bool
-    let color: Color
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 10, weight: .medium))
-                Text(label)
-                    .font(.system(size: 11, weight: .medium))
-            }
-            .foregroundColor(isActive ? color : .secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(isActive ? color.opacity(0.15) : Color.clear)
-            .cornerRadius(6)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-// MARK: - History Sidebar
-
-struct HistorySidebar: View {
-    @ObservedObject var historyService: ChatHistoryService
-    @Binding var showHistory: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("History")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-
-            ScrollView {
-                LazyVStack(spacing: 2) {
-                    ForEach(historyService.sessions) { session in
-                        SessionRow(
-                            session: session,
-                            isSelected: session.id == historyService.currentSession.id,
-                            onSelect: {
-                                historyService.loadSession(session)
-                            },
-                            onDelete: {
-                                historyService.deleteSession(session)
-                            }
-                        )
-                    }
-                }
-                .padding(.horizontal, 8)
-            }
-
-            Spacer()
-        }
-        .background(Color(NSColor.windowBackgroundColor).opacity(0.5))
-    }
-}
-
-struct SessionRow: View {
+struct SessionRowView: View {
     let session: ChatSession
     let isSelected: Bool
-    let onSelect: () -> Void
-    let onDelete: () -> Void
-
-    @State private var isHovering = false
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(session.title)
+        VStack(alignment: .leading, spacing: 2) {
+            Text(session.title)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+                .foregroundColor(.primary)
+
+            Text(session.updatedAt.formatted(.relative(presentation: .named)))
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+// MARK: - Note Row View (for native List)
+
+struct NoteRowView: View {
+    let note: Note
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Text(note.title)
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                     .foregroundColor(.primary)
-
-                Text(session.updatedAt.formatted(.relative(presentation: .named)))
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
             }
 
-            Spacer()
-
-            if isHovering {
-                Button(action: onDelete) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
+            Text(note.updatedAt.formatted(.relative(presentation: .named)))
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(isSelected ? Color.accentColor.opacity(0.2) : (isHovering ? Color(NSColor.controlBackgroundColor) : Color.clear))
-        .cornerRadius(6)
-        .onTapGesture(perform: onSelect)
-        .onHover { hovering in
-            isHovering = hovering
-        }
+        .padding(.vertical, 2)
     }
 }
 
@@ -661,7 +690,7 @@ struct MessageBlock: View {
                     message.role == .user ? "You" : "Claude",
                     systemImage: message.role == .user ? "person.fill" : "sparkles"
                 )
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(.secondary)
 
                 Spacer()
@@ -680,38 +709,23 @@ struct MessageBlock: View {
                 .padding(.vertical, 12)
         }
         .background(backgroundColor)
-        .cornerRadius(10)
+        .cornerRadius(8)
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: 8)
                 .stroke(borderColor, lineWidth: 1)
         )
     }
 
     private var backgroundColor: Color {
-        switch message.role {
-        case .user:
-            return Color(red: 0.22, green: 0.45, blue: 0.85).opacity(0.08)
-        case .assistant:
-            return Color(red: 0.55, green: 0.36, blue: 0.68).opacity(0.06)
-        }
+        Color(NSColor.controlBackgroundColor)
     }
 
     private var headerColor: Color {
-        switch message.role {
-        case .user:
-            return Color(red: 0.22, green: 0.45, blue: 0.85).opacity(0.12)
-        case .assistant:
-            return Color(red: 0.55, green: 0.36, blue: 0.68).opacity(0.10)
-        }
+        Color(NSColor.controlBackgroundColor).opacity(0.8)
     }
 
     private var borderColor: Color {
-        switch message.role {
-        case .user:
-            return Color(red: 0.22, green: 0.45, blue: 0.85).opacity(0.25)
-        case .assistant:
-            return Color(red: 0.55, green: 0.36, blue: 0.68).opacity(0.20)
-        }
+        Color(NSColor.separatorColor).opacity(0.5)
     }
 }
 
@@ -757,68 +771,39 @@ struct StreamingBlock: View {
     let isWorking: Bool
 
     @State private var dotCount = 0
-    @State private var spinnerRotation = 0.0
     let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
-    let spinnerTimer = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Label("Claude", systemImage: "sparkles")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.secondary)
                 Spacer()
 
                 // Status indicator
-                if isWorking {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.trianglehead.2.clockwise")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.orange)
-                            .rotationEffect(.degrees(spinnerRotation))
-                        Text("Working...")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.orange)
-                    }
-                } else {
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(Color.green)
-                            .frame(width: 6, height: 6)
-                        Text("Streaming")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.secondary)
-                    }
+                HStack(spacing: 5) {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                    Text(isWorking ? "Working..." : "Streaming")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
                 }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(isWorking ? Color.orange.opacity(0.10) : Color(red: 0.55, green: 0.36, blue: 0.68).opacity(0.10))
+            .background(Color(NSColor.controlBackgroundColor).opacity(0.8))
 
             if text.isEmpty {
-                // Show loading dots or working message
-                if isWorking {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                        Text("Running tools...")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 16)
-                } else {
-                    HStack(spacing: 6) {
-                        ForEach(0..<3, id: \.self) { index in
-                            Circle()
-                                .fill(Color.secondary)
-                                .frame(width: 6, height: 6)
-                                .opacity(dotCount == index ? 1 : 0.3)
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 16)
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text(isWorking ? "Running tools..." : "Thinking...")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 16)
             } else {
                 Markdown(text)
                     .textSelection(.enabled)
@@ -827,17 +812,14 @@ struct StreamingBlock: View {
                     .padding(.vertical, 12)
             }
         }
-        .background(isWorking ? Color.orange.opacity(0.04) : Color(red: 0.55, green: 0.36, blue: 0.68).opacity(0.06))
-        .cornerRadius(10)
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(8)
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(isWorking ? Color.orange.opacity(0.25) : Color(red: 0.55, green: 0.36, blue: 0.68).opacity(0.20), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: 1)
         )
         .onReceive(timer) { _ in
             dotCount = (dotCount + 1) % 3
-        }
-        .onReceive(spinnerTimer) { _ in
-            spinnerRotation += 15
         }
     }
 }
@@ -849,25 +831,30 @@ struct InputArea: View {
     @FocusState var isInputFocused: Bool
     let isLoading: Bool
     let onSend: () -> Void
+    var onTab: () -> Void = {}
+    var onArrowUp: () -> Void = {}
+    var onArrowDown: () -> Void = {}
+    var onEscape: () -> Void = {}
+    var shouldInterceptKeys: () -> Bool = { false }
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 10) {
             HStack(alignment: .center, spacing: 8) {
-                TextField("Ask Claude...", text: $inputText, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14))
-                    .lineLimit(1...8)
-                    .focused($isInputFocused)
-                    .frame(minHeight: 26)
-                    .onSubmit {
-                        if !NSEvent.modifierFlags.contains(.shift) {
-                            onSend()
-                        }
-                    }
+                ChatInputField(
+                    text: $inputText,
+                    placeholder: "Ask Claude...",
+                    onSubmit: onSend,
+                    onTab: onTab,
+                    onArrowUp: onArrowUp,
+                    onArrowDown: onArrowDown,
+                    onEscape: onEscape,
+                    shouldInterceptKeys: shouldInterceptKeys
+                )
+                .frame(minHeight: 20, maxHeight: 150)
 
                 Button(action: onSend) {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 26))
+                        .font(.system(size: 20))
                         .foregroundColor(inputText.isEmpty || isLoading ? .secondary.opacity(0.4) : .accentColor)
                 }
                 .buttonStyle(.plain)
@@ -877,12 +864,11 @@ struct InputArea: View {
             .padding(.trailing, 6)
             .padding(.vertical, 6)
             .background(Color(NSColor.controlBackgroundColor))
-            .cornerRadius(22)
+            .cornerRadius(8)
             .overlay(
-                RoundedRectangle(cornerRadius: 22)
+                RoundedRectangle(cornerRadius: 8)
                     .stroke(Color(NSColor.separatorColor).opacity(0.6), lineWidth: 1)
             )
-            .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
         }
         .padding(12)
         .background(Color(NSColor.windowBackgroundColor))
@@ -972,6 +958,183 @@ struct ScrollProxyHolder: View {
                     }
                 }
             }
+    }
+}
+
+// MARK: - ChatInputField (NSViewRepresentable with NSTextView for multiline support)
+
+struct ChatInputField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var onSubmit: () -> Void
+    var onTab: () -> Void
+    var onArrowUp: () -> Void
+    var onArrowDown: () -> Void
+    var onEscape: () -> Void
+    var shouldInterceptKeys: () -> Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+
+        let textView = ChatTextView()
+        textView.delegate = context.coordinator
+        textView.isRichText = false
+        textView.font = .systemFont(ofSize: 14)
+        textView.backgroundColor = .clear
+        textView.drawsBackground = false
+        textView.textContainerInset = NSSize(width: 0, height: 0)
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.widthTracksTextView = true
+        textView.allowsUndo = true
+
+        // Store callbacks
+        textView.onSubmit = { context.coordinator.parent.onSubmit() }
+        textView.onTabKey = { context.coordinator.handleTab() }
+        textView.onArrowUpKey = { context.coordinator.handleArrowUp() }
+        textView.onArrowDownKey = { context.coordinator.handleArrowDown() }
+        textView.onEscapeKey = { context.coordinator.handleEscape() }
+        textView.shouldInterceptKeys = { context.coordinator.parent.shouldInterceptKeys() }
+
+        scrollView.documentView = textView
+        context.coordinator.textView = textView
+
+        return scrollView
+    }
+
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let textView = nsView.documentView as? NSTextView else { return }
+
+        if textView.string != text {
+            textView.string = text
+        }
+
+        // Update placeholder visibility
+        if let chatTextView = textView as? ChatTextView {
+            chatTextView.placeholderString = placeholder
+            chatTextView.needsDisplay = true
+        }
+    }
+
+    class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: ChatInputField
+        weak var textView: NSTextView?
+
+        init(_ parent: ChatInputField) {
+            self.parent = parent
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            parent.text = textView.string
+        }
+
+        func handleTab() -> Bool {
+            guard parent.shouldInterceptKeys() else { return false }
+            parent.onTab()
+            return true
+        }
+
+        func handleArrowUp() -> Bool {
+            guard parent.shouldInterceptKeys() else { return false }
+            parent.onArrowUp()
+            return true
+        }
+
+        func handleArrowDown() -> Bool {
+            guard parent.shouldInterceptKeys() else { return false }
+            parent.onArrowDown()
+            return true
+        }
+
+        func handleEscape() -> Bool {
+            guard parent.shouldInterceptKeys() else { return false }
+            parent.onEscape()
+            return true
+        }
+    }
+}
+
+// Custom NSTextView that handles Return vs Shift+Return
+class ChatTextView: NSTextView {
+    var placeholderString: String = ""
+    var onSubmit: (() -> Void)?
+    var onTabKey: (() -> Bool)?
+    var onArrowUpKey: (() -> Bool)?
+    var onArrowDownKey: (() -> Bool)?
+    var onEscapeKey: (() -> Bool)?
+    var shouldInterceptKeys: (() -> Bool)?
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        // Draw placeholder when empty
+        if string.isEmpty && !placeholderString.isEmpty {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .foregroundColor: NSColor.placeholderTextColor,
+                .font: font ?? NSFont.systemFont(ofSize: 14)
+            ]
+            let rect = NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height)
+            placeholderString.draw(in: rect, withAttributes: attrs)
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let keyCode = event.keyCode
+        let modifiers = event.modifierFlags
+
+        // Return/Enter key
+        if keyCode == 36 {
+            if modifiers.contains(.shift) {
+                // Shift+Return: insert newline
+                insertNewline(nil)
+            } else {
+                // Return alone: submit
+                onSubmit?()
+            }
+            return
+        }
+
+        // Tab key
+        if keyCode == 48 {
+            if onTabKey?() == true {
+                return
+            }
+        }
+
+        // Arrow Up
+        if keyCode == 126 {
+            if onArrowUpKey?() == true {
+                return
+            }
+        }
+
+        // Arrow Down
+        if keyCode == 125 {
+            if onArrowDownKey?() == true {
+                return
+            }
+        }
+
+        // Escape
+        if keyCode == 53 {
+            if onEscapeKey?() == true {
+                return
+            }
+        }
+
+        super.keyDown(with: event)
     }
 }
 

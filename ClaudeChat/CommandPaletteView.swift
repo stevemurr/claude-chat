@@ -156,7 +156,7 @@ struct CommandPaletteView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color(NSColor.separatorColor), lineWidth: 1)
         )
-        .shadow(color: Color.black.opacity(0.25), radius: 20, x: 0, y: 10)
+        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
         .onChange(of: service.query) { _ in
             service.search()
         }

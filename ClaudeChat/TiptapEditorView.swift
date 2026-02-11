@@ -123,6 +123,7 @@ struct TiptapEditorView: NSViewRepresentable {
         webView.wantsLayer = true
         webView.layer?.drawsAsynchronously = true
         webView.underPageBackgroundColor = .clear
+        webView.setValue(false, forKey: "drawsBackground")
 
         // Load the HTML from app bundle
         if let htmlURL = Bundle.main.url(forResource: "tiptap-editor", withExtension: "html") {

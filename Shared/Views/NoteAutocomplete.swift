@@ -1,14 +1,14 @@
 import SwiftUI
 
 struct NoteAutocompletePopup: View {
-    @ObservedObject var noteService: NoteService
+    @ObservedObject var dailyNoteService: DailyNoteService
     let query: String
     @Binding var selectedIndex: Int
-    let onSelect: (Note) -> Void
+    let onSelect: (DailyNote) -> Void
     let onDismiss: () -> Void
 
-    private var filteredNotes: [Note] {
-        let results = noteService.searchNotes(query: query)
+    private var filteredNotes: [DailyNote] {
+        let results = dailyNoteService.searchNotes(query: query)
         return Array(results.prefix(5))
     }
 
@@ -33,11 +33,11 @@ struct NoteAutocompletePopup: View {
                 }
             }
             .padding(.vertical, 4)
-            .background(Color(NSColor.controlBackgroundColor))
+            .background(Color.platformControlBackground)
             .cornerRadius(8)
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: 1)
+                    .stroke(Color.platformSeparator.opacity(0.5), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: -4)
             .padding(.horizontal, 12)
@@ -47,17 +47,17 @@ struct NoteAutocompletePopup: View {
 }
 
 struct AutocompleteRow: View {
-    let note: Note
+    let note: DailyNote
     let isSelected: Bool
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "doc.text")
+            Image(systemName: "calendar")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(note.title)
+                Text(note.displayTitle)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.primary)
                     .lineLimit(1)

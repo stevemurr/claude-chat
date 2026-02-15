@@ -2,7 +2,8 @@ name: ClaudeChat
 options:
   bundleIdPrefix: com.claude
   deploymentTarget:
-    macOS: "13.0"
+    macOS: "14.0"
+    iOS: "17.0"
   createIntermediateGroups: true
 
 packages:
@@ -11,32 +12,84 @@ packages:
     from: "2.3.0"
 
 targets:
+  # macOS Target
   ClaudeChat:
     type: application
     platform: macOS
     sources:
-      - path: ClaudeChat
+      - path: Shared
+        excludes:
+          - "**/*.plist"
+      - path: macOS
         excludes:
           - Info.plist
           - ClaudeChat.entitlements
-          - Resources
-      - path: ClaudeChat/Resources
+      - path: Shared/Resources
         buildPhase: resources
     dependencies:
       - package: MarkdownUI
     info:
-      path: ClaudeChat/Info.plist
+      path: macOS/Info.plist
       properties:
         LSUIElement: true
         CFBundleDisplayName: ClaudeChat
         NSAppleEventsUsageDescription: ClaudeChat needs to send Apple Events.
+        NSAppTransportSecurity:
+          NSExceptionDomains:
+            tail11899.ts.net:
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
     entitlements:
-      path: ClaudeChat/ClaudeChat.entitlements
+      path: macOS/ClaudeChat.entitlements
     settings:
-      INFOPLIST_FILE: ClaudeChat/Info.plist
+      INFOPLIST_FILE: macOS/Info.plist
       PRODUCT_BUNDLE_IDENTIFIER: com.claude.ClaudeChat
       SWIFT_VERSION: "5.9"
-      MACOSX_DEPLOYMENT_TARGET: "13.0"
-      CODE_SIGN_ENTITLEMENTS: ClaudeChat/ClaudeChat.entitlements
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
+      CODE_SIGN_ENTITLEMENTS: macOS/ClaudeChat.entitlements
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_IDENTITY: "Apple Development"
+      DEVELOPMENT_TEAM: 6237SR7A22
       ENABLE_APP_SANDBOX: NO
       ENABLE_HARDENED_RUNTIME: NO
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  # iOS Target
+  ClaudeChat-iOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: Shared
+        excludes:
+          - "**/*.plist"
+      - path: iOS
+        excludes:
+          - Info.plist
+          - ClaudeChat-iOS.entitlements
+      - path: Shared/Resources
+        buildPhase: resources
+    dependencies:
+      - package: MarkdownUI
+    info:
+      path: iOS/Info.plist
+      properties:
+        CFBundleDisplayName: ClaudeChat
+        UILaunchScreen: {}
+        NSAppTransportSecurity:
+          NSExceptionDomains:
+            tail11899.ts.net:
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
+    entitlements:
+      path: iOS/ClaudeChat-iOS.entitlements
+    settings:
+      INFOPLIST_FILE: iOS/Info.plist
+      PRODUCT_BUNDLE_IDENTIFIER: com.claude.ClaudeChat
+      SWIFT_VERSION: "5.9"
+      IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+      TARGETED_DEVICE_FAMILY: "1,2"
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_IDENTITY: "Apple Development"
+      DEVELOPMENT_TEAM: 6237SR7A22
+      CODE_SIGN_ENTITLEMENTS: iOS/ClaudeChat-iOS.entitlements
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

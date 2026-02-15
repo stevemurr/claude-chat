@@ -58,8 +58,29 @@ class SettingsManager: ObservableObject {
         }
     }
 
+    @Published var apiEndpoint: String {
+        didSet {
+            UserDefaults.standard.set(apiEndpoint, forKey: apiEndpointKey)
+        }
+    }
+
+    @Published var useAPIService: Bool {
+        didSet {
+            UserDefaults.standard.set(useAPIService, forKey: useAPIServiceKey)
+        }
+    }
+
+    @Published var syncServerURL: String {
+        didSet {
+            UserDefaults.standard.set(syncServerURL, forKey: syncServerURLKey)
+        }
+    }
+
     private let hotkeyKey = "hotkey_config"
     private let claudePathKey = "claude_path"
+    private let apiEndpointKey = "api_endpoint"
+    private let useAPIServiceKey = "use_api_service"
+    private let syncServerURLKey = "syncServerURL"
 
     // Common locations where claude CLI might be installed
     static let defaultClaudePaths = [
@@ -83,6 +104,55 @@ class SettingsManager: ObservableObject {
             self.claudePath = savedPath
         } else {
             self.claudePath = SettingsManager.detectClaudePath() ?? ""
+        }
+
+        // Load API settings
+        if let savedEndpoint = UserDefaults.standard.string(forKey: apiEndpointKey), !savedEndpoint.isEmpty {
+            self.apiEndpoint = savedEndpoint
+        } else {
+            self.apiEndpoint = "http://macbook-pro-8.tail11899.ts.net:8080"
+        }
+
+        self.useAPIService = UserDefaults.standard.bool(forKey: useAPIServiceKey)
+
+        // Load sync server URL
+        if let savedSyncURL = UserDefaults.standard.string(forKey: syncServerURLKey), !savedSyncURL.isEmpty {
+            self.syncServerURL = savedSyncURL
+        } else {
+            self.syncServerURL = "http://macbook-pro-8.tail11899.ts.net:8081"
+        }
+
+        // Migrate old URLs to tailnet
+        migrateOldURLs()
+
+        // didSet doesn't fire during init, so always ensure defaults are saved
+        // This handles fresh installs where no migration occurs
+        UserDefaults.standard.set(apiEndpoint, forKey: apiEndpointKey)
+        UserDefaults.standard.set(syncServerURL, forKey: syncServerURLKey)
+    }
+
+    private static let currentTailnetHost = "macbook-pro-8.tail11899.ts.net"
+
+    private func migrateOldURLs() {
+        let oldPatterns = ["192.168.1.231", "localhost", "127.0.0.1"]
+        var didMigrate = false
+
+        for pattern in oldPatterns {
+            if apiEndpoint.contains(pattern) {
+                apiEndpoint = apiEndpoint.replacingOccurrences(of: pattern, with: Self.currentTailnetHost)
+                didMigrate = true
+            }
+            if syncServerURL.contains(pattern) {
+                syncServerURL = syncServerURL.replacingOccurrences(of: pattern, with: Self.currentTailnetHost)
+                didMigrate = true
+            }
+        }
+
+        // didSet doesn't fire during init, so save manually
+        if didMigrate {
+            UserDefaults.standard.set(apiEndpoint, forKey: apiEndpointKey)
+            UserDefaults.standard.set(syncServerURL, forKey: syncServerURLKey)
+            print("[SettingsManager] Migrated URLs to tailnet: \(Self.currentTailnetHost)")
         }
     }
 
@@ -153,7 +223,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 20) {
             // Header
             HStack {
                 Text("Settings")
@@ -166,37 +236,55 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
             }
-            .padding()
-            .background(Color(NSColor.windowBackgroundColor))
 
             Divider()
 
-            // Content
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Global Hotkey")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Global Hotkey")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.secondary)
 
-                    HStack {
-                        HotkeyRecorder(
-                            hotkey: $settings.hotkey,
-                            isRecording: $isRecording
-                        )
+                HStack {
+                    HotkeyRecorder(
+                        hotkey: $settings.hotkey,
+                        isRecording: $isRecording
+                    )
 
-                        Button("Reset") {
-                            settings.hotkey = .default
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundColor(.secondary)
-                        .font(.system(size: 12))
+                    Button("Reset") {
+                        settings.hotkey = .default
                     }
-
-                    Text("Click the box and press your desired key combination")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
+                    .font(.system(size: 12))
                 }
 
+                Text("Click the box and press your desired key combination")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
+            // Service Toggle
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Claude Service")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.secondary)
+
+                Picker("", selection: $settings.useAPIService) {
+                    Text("Local CLI").tag(false)
+                    Text("API Server").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 200)
+
+                Text(settings.useAPIService
+                    ? "Use HTTP API (works on iOS & remote)"
+                    : "Use local Claude CLI (macOS only)")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
+            // CLI Path (only shown when using CLI)
+            if !settings.useAPIService {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Claude CLI Path")
                         .font(.system(size: 12, weight: .semibold))
@@ -244,12 +332,44 @@ struct SettingsView: View {
                             .foregroundColor(.green)
                     }
                 }
-
-                Spacer()
             }
-            .padding(20)
+
+            // API Endpoint (only shown when using API)
+            if settings.useAPIService {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("API Endpoint")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.secondary)
+
+                    TextField("http://macbook-pro-8.tail11899.ts.net:8080", text: $settings.apiEndpoint)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
+
+                    Text("OpenAI-compatible endpoint (e.g., Tailscale node)")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            // Sync Server
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Sync Server")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.secondary)
+
+                TextField("http://macbook-pro-8.tail11899.ts.net:8081", text: $settings.syncServerURL)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+
+                Text("Server for syncing notes across devices")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
         }
-        .frame(width: 450, height: 280)
+        .padding(20)
+        .frame(width: 450, height: 420)
         .background(Color(NSColor.textBackgroundColor))
     }
 }

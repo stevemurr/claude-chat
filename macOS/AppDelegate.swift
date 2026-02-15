@@ -67,10 +67,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         searchItem.target = self
         menu.addItem(searchItem)
 
-        let toggleModeItem = NSMenuItem(title: "Toggle Mode", action: #selector(toggleModeAction), keyEquivalent: "")
-        toggleModeItem.target = self
-        menu.addItem(toggleModeItem)
-
         menu.addItem(NSMenuItem.separator())
 
         let settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettingsAction), keyEquivalent: ",")
@@ -118,11 +114,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func searchAction() {
         showWindow()
         NotificationCenter.default.post(name: .openCommandPalette, object: nil)
-    }
-
-    @objc private func toggleModeAction() {
-        showWindow()
-        NotificationCenter.default.post(name: .toggleMode, object: nil)
     }
 
     @objc private func openSettingsAction() {
@@ -252,9 +243,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return true
         }
 
-        // Shift+Tab to cycle modes
-        if event.keyCode == 48 && flags == .shift && window?.isVisible == true { // 48 = Tab
-            NotificationCenter.default.post(name: .toggleMode, object: nil)
+        // Cmd+Ctrl+S to toggle calendar (left) sidebar
+        if event.keyCode == 1 && flags == [.command, .control] && window?.isVisible == true { // 1 = S
+            NotificationCenter.default.post(name: .toggleCalendarSidebar, object: nil)
+            return true
+        }
+
+        // Cmd+Shift+L to toggle chat (right) sidebar
+        if event.keyCode == 37 && flags == [.command, .shift] && window?.isVisible == true { // 37 = L
+            NotificationCenter.default.post(name: .toggleChatSidebar, object: nil)
             return true
         }
 
@@ -333,7 +330,8 @@ extension Notification.Name {
     static let focusInput = Notification.Name("focusInput")
     static let newChat = Notification.Name("newChat")
     static let newNote = Notification.Name("newNote")
-    static let toggleMode = Notification.Name("toggleMode")
+    static let toggleCalendarSidebar = Notification.Name("toggleCalendarSidebar")
+    static let toggleChatSidebar = Notification.Name("toggleChatSidebar")
     static let openSettings = Notification.Name("openSettings")
     static let openCommandPalette = Notification.Name("openCommandPalette")
 }

@@ -1,9 +1,5 @@
 import Foundation
 
-struct ClaudeError: Error {
-    let message: String
-}
-
 // Stream JSON message types from claude CLI
 struct StreamMessage: Decodable {
     let type: String
@@ -21,23 +17,21 @@ struct StreamMessage: Decodable {
     }
 }
 
-struct StreamUpdate {
-    let text: String
-    let isComplete: Bool  // true when this message block is complete
-    let isWorking: Bool   // true when tools are running in background
-}
-
 @MainActor
-class ClaudeService: ObservableObject {
+class ClaudeService: ObservableObject, ClaudeServiceProtocol {
     @Published var isLoading = false
     @Published var lastError: String?
     @Published var streamingText: String = ""
     @Published var isWorking: Bool = false  // Tools running in background
 
-    private var conversationStarted = false
     private var currentProcess: Process?
 
-    func sendMessage(_ message: String, noteContext: String? = nil, onUpdate: @escaping (StreamUpdate) -> Void) async -> [String]? {
+    func sendMessage(
+        _ message: String,
+        noteContext: String? = nil,
+        continueConversation: Bool = false,
+        onUpdate: @escaping (StreamUpdate) -> Void
+    ) async -> [String]? {
         isLoading = true
         isWorking = false
         lastError = nil
@@ -46,20 +40,24 @@ class ClaudeService: ObservableObject {
         // Build full message with note context prepended
         let fullMessage: String
         if let context = noteContext, !context.isEmpty {
-            fullMessage = "[The user has attached the following notes for reference:]\n\(context)\n\n[User's message:]\n\(message)"
+            fullMessage = """
+            [The user has attached the following notes for reference. You can update these notes by including <note-update date="YYYY-MM-DD">new content</note-update> in your response, where YYYY-MM-DD matches the date shown in parentheses.]
+
+            \(context)
+
+            [User's message:]
+            \(message)
+            """
         } else {
             fullMessage = message
         }
 
-        let shouldContinue = conversationStarted
-
         let result = await Task.detached(priority: .userInitiated) {
-            await self.runClaudeStreaming(message: fullMessage, continueConversation: shouldContinue, onUpdate: onUpdate)
+            await self.runClaudeStreaming(message: fullMessage, continueConversation: continueConversation, onUpdate: onUpdate)
         }.value
 
         switch result {
         case .success(let outputs):
-            conversationStarted = true
             isLoading = false
             isWorking = false
             return outputs
@@ -212,10 +210,6 @@ class ClaudeService: ObservableObject {
         } catch {
             return .failure(ClaudeError(message: error.localizedDescription))
         }
-    }
-
-    func resetConversation() {
-        conversationStarted = false
     }
 
     func cancelRequest() {

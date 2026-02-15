@@ -1,5 +1,6 @@
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
+import Link from '@tiptap/extension-link'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -354,6 +355,59 @@ const SlashCommands = Extension.create({
   },
 })
 
+// --- Tab Indentation Extension ---
+
+const TabIndentation = Extension.create({
+  name: 'tabIndentation',
+
+  addKeyboardShortcuts() {
+    return {
+      Tab: ({ editor }) => {
+        // Check if we're in a task list
+        if (editor.isActive('taskItem')) {
+          // Try to sink the task item
+          if (editor.can().sinkListItem('taskItem')) {
+            editor.chain().focus().sinkListItem('taskItem').run()
+            return true
+          }
+          // Can't sink (first item or already max depth), just consume the key
+          return true
+        }
+        // Check if we're in a regular list
+        if (editor.isActive('listItem')) {
+          if (editor.can().sinkListItem('listItem')) {
+            editor.chain().focus().sinkListItem('listItem').run()
+            return true
+          }
+          return true
+        }
+        // Not in a list, insert a tab character
+        editor.chain().focus().insertContent('\t').run()
+        return true
+      },
+      'Shift-Tab': ({ editor }) => {
+        // Check if we're in a task list
+        if (editor.isActive('taskItem')) {
+          if (editor.can().liftListItem('taskItem')) {
+            editor.chain().focus().liftListItem('taskItem').run()
+            return true
+          }
+          return true
+        }
+        // Check if we're in a regular list
+        if (editor.isActive('listItem')) {
+          if (editor.can().liftListItem('listItem')) {
+            editor.chain().focus().liftListItem('listItem').run()
+            return true
+          }
+          return true
+        }
+        return true
+      },
+    }
+  },
+})
+
 // --- Custom input rule for todo shortcut: [] or [ ] at start of line ---
 
 const TodoInputRule = Extension.create({
@@ -624,9 +678,17 @@ function initEditor() {
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
       }),
+      Link.configure({
+        openOnClick: false, // We handle clicks ourselves
+        autolink: true,
+        linkOnPaste: true,
+        HTMLAttributes: {
+          class: 'tiptap-link',
+        },
+      }),
       TaskList,
       TaskItem.configure({
-        nested: false,
+        nested: true,
       }),
       Placeholder.configure({
         placeholder: 'Type / for commands...',
@@ -649,6 +711,7 @@ function initEditor() {
       SlashCommands,
       TodoInputRule,
       TableContextMenu,
+      TabIndentation,
     ],
     autofocus: true,
     editorProps: {
@@ -696,6 +759,21 @@ function initEditor() {
   } catch (e) {
     // Not in WKWebView context
   }
+
+  // Handle link clicks - send to Swift to open in browser
+  document.getElementById('editor').addEventListener('click', (e) => {
+    const link = e.target.closest('a')
+    if (link && link.href) {
+      e.preventDefault()
+      e.stopPropagation()
+      try {
+        webkit.messageHandlers.openLink.postMessage(link.href)
+      } catch (err) {
+        // Fallback for non-WKWebView context
+        window.open(link.href, '_blank')
+      }
+    }
+  })
 }
 
 // Handle click outside menus to dismiss

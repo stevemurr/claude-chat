@@ -9,7 +9,7 @@ enum CommandPaletteState {
 // MARK: - Model
 
 enum CommandPaletteItemType {
-    case note
+    case dailyNote
     case chat
     case action
 }
@@ -20,48 +20,48 @@ enum CommandPaletteAction: String {
 }
 
 struct CommandPaletteItem: Identifiable {
-    let id: UUID
+    let id: String
     let type: CommandPaletteItemType
     let title: String
     let preview: String
     let timestamp: Date
     var score: Double
-    let note: Note?
+    let dailyNote: DailyNote?
     let session: ChatSession?
     let action: CommandPaletteAction?
 
-    init(note: Note, score: Double = 0) {
-        self.id = note.id
-        self.type = .note
-        self.title = note.title
-        self.preview = Self.makePreview(from: note.content)
-        self.timestamp = note.updatedAt
+    init(dailyNote: DailyNote, score: Double = 0) {
+        self.id = dailyNote.dateKey
+        self.type = .dailyNote
+        self.title = dailyNote.displayTitle
+        self.preview = Self.makePreview(from: dailyNote.content)
+        self.timestamp = dailyNote.updatedAt
         self.score = score
-        self.note = note
+        self.dailyNote = dailyNote
         self.session = nil
         self.action = nil
     }
 
     init(session: ChatSession, score: Double = 0) {
-        self.id = session.id
+        self.id = session.id.uuidString
         self.type = .chat
         self.title = session.title
         self.preview = Self.makePreview(from: session.messages.last?.content ?? "")
         self.timestamp = session.updatedAt
         self.score = score
-        self.note = nil
+        self.dailyNote = nil
         self.session = session
         self.action = nil
     }
 
     init(action: CommandPaletteAction, title: String, preview: String) {
-        self.id = UUID()
+        self.id = UUID().uuidString
         self.type = .action
         self.title = title
         self.preview = preview
         self.timestamp = Date()
         self.score = 100 // Actions always sort first
-        self.note = nil
+        self.dailyNote = nil
         self.session = nil
         self.action = action
     }
@@ -172,16 +172,16 @@ class CommandPaletteService: ObservableObject {
     @Published var selectedIndex: Int = 0
     @Published var isVisible: Bool = false
 
-    private var noteService: NoteService?
+    private var dailyNoteService: DailyNoteService?
     private var historyService: ChatHistoryService?
 
     private let actions: [CommandPaletteItem] = [
         CommandPaletteItem(action: .newChat, title: "New Chat", preview: "Start a new conversation"),
-        CommandPaletteItem(action: .newNote, title: "New Note", preview: "Create a new note"),
+        CommandPaletteItem(action: .newNote, title: "Today's Note", preview: "Open today's daily note"),
     ]
 
-    func configure(noteService: NoteService, historyService: ChatHistoryService) {
-        self.noteService = noteService
+    func configure(dailyNoteService: DailyNoteService, historyService: ChatHistoryService? = nil) {
+        self.dailyNoteService = dailyNoteService
         self.historyService = historyService
     }
 
@@ -213,17 +213,17 @@ class CommandPaletteService: ObservableObject {
             $0.title.lowercased().contains(loweredQuery)
         }
 
-        // Search notes and chats
+        // Search daily notes and chats
         var searchItems: [CommandPaletteItem] = []
 
-        // Search notes: fuzzy on title, substring-only on content
-        if let noteService = noteService {
-            for note in noteService.notes {
-                let titleScore = fuzzyMatch(query: query, target: note.title)
+        // Search daily notes: fuzzy on display title, substring-only on content
+        if let dailyNoteService = dailyNoteService {
+            for note in dailyNoteService.allNotes {
+                let titleScore = fuzzyMatch(query: query, target: note.displayTitle)
                 let contentHit = note.content.lowercased().contains(loweredQuery) ? 0.5 : 0.0
                 let bestScore = max(titleScore ?? 0, contentHit)
                 if bestScore > 0 {
-                    searchItems.append(CommandPaletteItem(note: note, score: bestScore))
+                    searchItems.append(CommandPaletteItem(dailyNote: note, score: bestScore))
                 }
             }
         }
@@ -271,9 +271,9 @@ class CommandPaletteService: ObservableObject {
     private func computeRecentItems() {
         var recentItems: [CommandPaletteItem] = []
 
-        if let noteService = noteService {
-            for note in noteService.notes {
-                recentItems.append(CommandPaletteItem(note: note))
+        if let dailyNoteService = dailyNoteService {
+            for note in dailyNoteService.allNotes {
+                recentItems.append(CommandPaletteItem(dailyNote: note))
             }
         }
 

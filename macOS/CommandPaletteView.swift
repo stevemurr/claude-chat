@@ -191,7 +191,7 @@ struct CommandPaletteRow: View {
                         .lineLimit(1)
 
                     if item.type != .action {
-                        Text(item.type == .note ? "Note" : "Chat")
+                        Text(item.type == .dailyNote ? "Note" : "Chat")
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundColor(.secondary)
                             .padding(.horizontal, 5)
@@ -234,10 +234,10 @@ struct CommandPaletteRow: View {
     private var iconName: String {
         switch item.type {
         case .action:
-            if item.action == .newNote { return "plus.square" }
+            if item.action == .newNote { return "calendar.badge.plus" }
             return "plus.bubble"
-        case .note:
-            return "doc.text"
+        case .dailyNote:
+            return "calendar"
         case .chat:
             return "bubble.left.fill"
         }
@@ -246,7 +246,7 @@ struct CommandPaletteRow: View {
     private var iconColor: Color {
         switch item.type {
         case .action: return .green
-        case .note: return .orange
+        case .dailyNote: return .orange
         case .chat: return .blue
         }
     }

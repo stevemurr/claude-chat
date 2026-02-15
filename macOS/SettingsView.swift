@@ -368,8 +368,10 @@ struct SettingsView: View {
 
             Spacer()
         }
-        .padding(20)
-        .frame(width: 450, height: 420)
+        .padding(.horizontal, 20)
+        .padding(.top, 24)
+        .padding(.bottom, 20)
+        .frame(width: 450, height: 440)
         .background(Color(NSColor.textBackgroundColor))
     }
 }

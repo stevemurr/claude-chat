@@ -30066,12 +30066,12 @@ ${element.innerHTML}
           heading: { levels: [1, 2, 3] }
         }),
         Link.configure({
-          openOnClick: true,
+          openOnClick: false,
+          // We handle clicks ourselves
           autolink: true,
           linkOnPaste: true,
           HTMLAttributes: {
-            target: "_blank",
-            rel: "noopener noreferrer"
+            class: "tiptap-link"
           }
         }),
         TaskList,
@@ -30140,6 +30140,18 @@ ${element.innerHTML}
       webkit.messageHandlers.editorReady.postMessage(true);
     } catch (e) {
     }
+    document.getElementById("editor").addEventListener("click", (e) => {
+      const link2 = e.target.closest("a");
+      if (link2 && link2.href) {
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+          webkit.messageHandlers.openLink.postMessage(link2.href);
+        } catch (err) {
+          window.open(link2.href, "_blank");
+        }
+      }
+    });
   }
   document.addEventListener("click", (e) => {
     if (slashMenuVisible && slashMenuEl && !slashMenuEl.contains(e.target)) {

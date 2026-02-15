@@ -606,6 +606,7 @@ function editorToMarkdown(editor) {
   return serializeChildren(json.content, {})
 }
 
+
 // --- Table Markdown Fix Extension ---
 // Fixes markdown table parsing by unwrapping <thead> and <tbody> elements
 // that markdown-it generates but Tiptap's Table schema doesn't expect

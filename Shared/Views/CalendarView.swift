@@ -67,10 +67,11 @@ struct CalendarView: View {
             }
 
             Divider()
-                .padding(.vertical, 8)
+                .padding(.vertical, 4)
 
             WeekView(dailyNoteService: dailyNoteService, onDateTap: onDateTap)
         }
+        .frame(maxHeight: .infinity)
         .padding(12)
     }
 

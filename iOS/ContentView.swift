@@ -168,15 +168,11 @@ struct CalendarPageView: View {
 
             Divider()
 
-            // Calendar
-            ScrollView {
-                CalendarView(dailyNoteService: dailyNoteService, onDateTap: {
-                    onDateSelected()
-                })
-                .padding()
-            }
-
-            Spacer()
+            // Calendar view fills remaining space
+            CalendarView(dailyNoteService: dailyNoteService, onDateTap: {
+                onDateSelected()
+            })
+            .padding(.horizontal)
         }
         .background(Color(UIColor.systemGroupedBackground))
     }

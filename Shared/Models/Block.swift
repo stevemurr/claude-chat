@@ -13,6 +13,7 @@ enum BlockType: String, Codable, CaseIterable {
     case quote
     case code
     case divider
+    case group
 }
 
 // MARK: - Block Model
@@ -180,6 +181,12 @@ extension Array where Element == Block {
                 lines.append("```")
             case .divider:
                 lines.append("---")
+            case .group:
+                // Groups are handled by Tiptap directly and serialized with HTML comments
+                // This case is for completeness but shouldn't be reached in normal use
+                lines.append("<!-- group -->")
+                lines.append(block.content)
+                lines.append("<!-- /group -->")
             }
 
             // Blank line between blocks, except consecutive same-type list items

@@ -29504,6 +29504,211 @@ ${element.innerHTML}
   });
 
   // editor.js
+  var GroupNode = Node3.create({
+    name: "contentGroup",
+    group: "block",
+    content: "block+",
+    defining: true,
+    addAttributes() {
+      return {
+        id: {
+          default: null,
+          parseHTML: (element) => element.getAttribute("data-group-id"),
+          renderHTML: (attributes) => ({
+            "data-group-id": attributes.id
+          })
+        },
+        title: {
+          default: "Untitled",
+          parseHTML: (element) => element.getAttribute("data-group-title"),
+          renderHTML: (attributes) => ({
+            "data-group-title": attributes.title
+          })
+        }
+      };
+    },
+    parseHTML() {
+      return [
+        {
+          tag: 'div[data-type="content-group"]'
+        }
+      ];
+    },
+    renderHTML({ HTMLAttributes }) {
+      return ["div", mergeAttributes(HTMLAttributes, {
+        "data-type": "content-group",
+        class: "content-group"
+      }), 0];
+    },
+    addNodeView() {
+      return ({ node, getPos, editor }) => {
+        const dom = document.createElement("div");
+        dom.className = "content-group";
+        dom.setAttribute("data-type", "content-group");
+        dom.setAttribute("data-group-id", node.attrs.id || "");
+        let currentNode = node;
+        const getFirstLineTitle = (groupNode) => {
+          let title = "Untitled";
+          if (groupNode.content && groupNode.content.size > 0) {
+            const firstChild = groupNode.content.firstChild;
+            if (firstChild) {
+              let text2 = "";
+              firstChild.forEach((child) => {
+                if (child.isText) {
+                  text2 += child.text;
+                }
+              });
+              text2 = text2.trim();
+              text2 = text2.replace(/^#{1,6}\s*/, "").replace(/^\s*[-*+]\s*/, "").replace(/^\s*\d+\.\s*/, "").replace(/^\s*>\s*/, "").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1").replace(/__([^_]+)__/g, "$1").replace(/_([^_]+)_/g, "$1").replace(/`([^`]+)`/g, "$1").trim();
+              if (text2) {
+                title = text2.length > 50 ? text2.substring(0, 50) + "\u2026" : text2;
+              }
+            }
+          }
+          return title;
+        };
+        const initialTitle = getFirstLineTitle(node);
+        const header = document.createElement("div");
+        header.className = "content-group-header";
+        header.innerHTML = `
+        <span class="content-group-icon">\u{1F4C1}</span>
+        <span class="content-group-title">${escapeHtml2(initialTitle)}</span>
+        <span class="content-group-chevron">\u203A</span>
+      `;
+        header.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const groupId = currentNode.attrs.id;
+          const groupTitle = getFirstLineTitle(currentNode);
+          try {
+            webkit.messageHandlers.openGroup.postMessage({
+              id: groupId,
+              title: groupTitle,
+              pos: typeof getPos === "function" ? getPos() : 0
+            });
+          } catch (err) {
+            console.log("openGroup:", groupId, groupTitle);
+          }
+        });
+        const contentWrapper = document.createElement("div");
+        contentWrapper.className = "content-group-content";
+        dom.appendChild(header);
+        dom.appendChild(contentWrapper);
+        return {
+          dom,
+          contentDOM: contentWrapper,
+          update: (updatedNode) => {
+            if (updatedNode.type.name !== "contentGroup") return false;
+            currentNode = updatedNode;
+            const titleEl = header.querySelector(".content-group-title");
+            if (titleEl) {
+              titleEl.textContent = getFirstLineTitle(updatedNode);
+            }
+            dom.setAttribute("data-group-id", updatedNode.attrs.id || "");
+            return true;
+          }
+        };
+      };
+    },
+    addCommands() {
+      return {
+        insertGroup: (attrs2 = {}) => ({ chain, state }) => {
+          const id = attrs2.id || generateUUID();
+          const title = attrs2.title || "Untitled";
+          return chain().insertContent({
+            type: "contentGroup",
+            attrs: { id, title },
+            content: [{ type: "paragraph" }]
+          }).run();
+        },
+        setGroupTitle: (id, title) => ({ tr: tr2, state, dispatch }) => {
+          let found2 = false;
+          state.doc.descendants((node, pos) => {
+            if (node.type.name === "contentGroup" && node.attrs.id === id) {
+              if (dispatch) {
+                tr2.setNodeMarkup(pos, null, { ...node.attrs, title });
+              }
+              found2 = true;
+              return false;
+            }
+          });
+          return found2;
+        }
+      };
+    }
+  });
+  function escapeHtml2(text2) {
+    const div = document.createElement("div");
+    div.textContent = text2;
+    return div.innerHTML;
+  }
+  function generateUUID() {
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+      const r = Math.random() * 16 | 0;
+      const v = c === "x" ? r : r & 3 | 8;
+      return v.toString(16);
+    });
+  }
+  var GroupSelectionExtension = Extension.create({
+    name: "groupSelection",
+    addKeyboardShortcuts() {
+      return {
+        "Mod-g": ({ editor }) => {
+          return groupCurrentSelection(editor);
+        },
+        "Escape": () => {
+          try {
+            webkit.messageHandlers.navigateBack.postMessage(true);
+            return true;
+          } catch (err) {
+            return false;
+          }
+        }
+      };
+    }
+  });
+  function groupCurrentSelection(editor) {
+    const { state } = editor;
+    const { selection, schema: schema2 } = state;
+    const { from: from2, to } = selection;
+    if (from2 === to) {
+      return false;
+    }
+    const $from = state.doc.resolve(from2);
+    const $to = state.doc.resolve(to);
+    let startPos = from2;
+    let endPos = to;
+    for (let d = $from.depth; d >= 1; d--) {
+      if ($from.node(d - 1).type.name === "doc") {
+        startPos = $from.before(d);
+        break;
+      }
+    }
+    for (let d = $to.depth; d >= 1; d--) {
+      if ($to.node(d - 1).type.name === "doc") {
+        endPos = $to.after(d);
+        break;
+      }
+    }
+    const slice2 = state.doc.slice(startPos, endPos);
+    const content = slice2.content;
+    if (content.size === 0) {
+      return false;
+    }
+    const groupType = schema2.nodes.contentGroup;
+    if (!groupType) {
+      console.error("contentGroup node type not found in schema");
+      return false;
+    }
+    const groupId = generateUUID();
+    const group = groupType.create(
+      { id: groupId, title: "Untitled" },
+      content
+    );
+    const tr2 = state.tr.replaceWith(startPos, endPos, group);
+    editor.view.dispatch(tr2);
+    return true;
+  }
   var tableMenuEl = null;
   var tableMenuVisible = false;
   var tableMenuCommands = [
@@ -29623,7 +29828,8 @@ ${element.innerHTML}
     { type: "blockquote", title: "Quote", icon: "\u201C", keywords: ["blockquote", "quote"] },
     { type: "codeBlock", title: "Code", icon: "</>", keywords: ["snippet", "pre", "mono", "code"] },
     { type: "horizontalRule", title: "Divider", icon: "\u2014", keywords: ["hr", "line", "separator", "divider"] },
-    { type: "table", title: "Table", icon: "\u2637", keywords: ["table", "grid", "rows", "columns", "cells"] }
+    { type: "table", title: "Table", icon: "\u2637", keywords: ["table", "grid", "rows", "columns", "cells"] },
+    { type: "group", title: "Group", icon: "\u{1F4C1}", keywords: ["group", "page", "folder", "container", "card"] }
   ];
   var slashMenuEl = null;
   var slashMenuVisible = false;
@@ -29721,6 +29927,9 @@ ${element.innerHTML}
         break;
       case "table":
         editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
+        break;
+      case "group":
+        editor.chain().focus().insertGroup().run();
         break;
     }
     hideSlashMenu();
@@ -29976,6 +30185,15 @@ ${element.innerHTML}
       case "tableCell":
       case "tableHeader":
         return "";
+      case "contentGroup": {
+        const groupId = node.attrs?.id || "";
+        const inner = serializeChildren(node.content, context);
+        const firstLine = inner.split("\n")[0] || "";
+        const title = firstLine.replace(/^#{1,6}\s*/, "").replace(/^\s*[-*+]\s*/, "").replace(/^\s*\d+\.\s*/, "").replace(/^\s*>\s*/, "").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1").replace(/`([^`]+)`/g, "$1").trim().substring(0, 50) || "Untitled";
+        return `<!-- group:${groupId}:${title} -->
+${inner}
+<!-- /group:${groupId} -->`;
+      }
       default:
         if (node.content) {
           return (node.content || []).map((c) => serializeNode(c, context)).join("\n");
@@ -30033,6 +30251,17 @@ ${element.innerHTML}
       };
     }
   });
+  function preprocessGroupMarkdown(markdown) {
+    const groupStartRegex = /<!--\s*group:([^:]+):([^>]+?)\s*-->/g;
+    const groupEndRegex = /<!--\s*\/group:([^>]+?)\s*-->/g;
+    let result = markdown;
+    result = result.replace(groupStartRegex, (match2, id, title) => {
+      const escapedTitle = title.replace(/"/g, "&quot;");
+      return `<div data-type="content-group" data-group-id="${id}" data-group-title="${escapedTitle}">`;
+    });
+    result = result.replace(groupEndRegex, "</div>");
+    return result;
+  }
   var TableContextMenu = Extension.create({
     name: "tableContextMenu",
     addProseMirrorPlugins() {
@@ -30082,7 +30311,8 @@ ${element.innerHTML}
           placeholder: "Type / for commands..."
         }),
         Markdown.configure({
-          html: false,
+          html: true,
+          // Required for group nodes to parse correctly
           transformCopiedText: true,
           transformPastedText: true
         }),
@@ -30099,7 +30329,9 @@ ${element.innerHTML}
         SlashCommands,
         TodoInputRule,
         TableContextMenu,
-        TabIndentation
+        TabIndentation,
+        GroupNode,
+        GroupSelectionExtension
       ],
       autofocus: true,
       editorProps: {
@@ -30122,7 +30354,8 @@ ${element.innerHTML}
         if (!markdown || markdown.trim() === "") {
           editor.commands.clearContent();
         } else {
-          editor.commands.setContent(markdown);
+          const processed = preprocessGroupMarkdown(markdown);
+          editor.commands.setContent(processed);
         }
       },
       getContent() {
@@ -30134,6 +30367,57 @@ ${element.innerHTML}
       clear() {
         editor.commands.clearContent();
         editor.commands.focus();
+      },
+      // Get the content of a specific group by ID
+      getGroupContent(groupId) {
+        const { state } = editor;
+        let content = "";
+        state.doc.descendants((node, pos) => {
+          if (node.type.name === "contentGroup" && node.attrs.id === groupId) {
+            const groupContent = { type: "doc", content: [] };
+            node.forEach((child) => {
+              groupContent.content.push(child.toJSON());
+            });
+            content = serializeChildren(groupContent.content, {});
+            return false;
+          }
+        });
+        return content;
+      },
+      // Update the content of a specific group by ID
+      updateGroupContent(groupId, newMarkdown) {
+        const { state } = editor;
+        let found2 = false;
+        state.doc.descendants((node, pos) => {
+          if (node.type.name === "contentGroup" && node.attrs.id === groupId) {
+            const tempEditor = new Editor({
+              extensions: editor.extensionManager.extensions,
+              content: preprocessGroupMarkdown(newMarkdown)
+            });
+            const newContent = tempEditor.state.doc.content;
+            tempEditor.destroy();
+            const tr2 = state.tr;
+            const groupStart = pos + 1;
+            const groupEnd = pos + node.nodeSize - 1;
+            tr2.replaceWith(groupStart, groupEnd, newContent);
+            editor.view.dispatch(tr2);
+            found2 = true;
+            return false;
+          }
+        });
+        return found2;
+      },
+      // Set the title of a group
+      setGroupTitle(groupId, title) {
+        return editor.commands.setGroupTitle(groupId, title);
+      },
+      // Navigate back (for keyboard shortcut - tells Swift to handle navigation)
+      navigateBack() {
+        try {
+          webkit.messageHandlers.navigateBack.postMessage(true);
+        } catch (err) {
+          console.log("navigateBack not available");
+        }
       }
     };
     try {
@@ -30150,8 +30434,53 @@ ${element.innerHTML}
         } catch (err) {
           window.open(link2.href, "_blank");
         }
+        return;
+      }
+      const editorEl = document.getElementById("editor");
+      const contentEl = editorEl.querySelector(".tiptap-content");
+      if (contentEl && e.target === editorEl) {
+        editor.commands.focus("end");
       }
     });
+    document.getElementById("editor").addEventListener("click", (e) => {
+      const editorEl = document.getElementById("editor");
+      const contentEl = editorEl.querySelector(".tiptap-content");
+      if (!contentEl) return;
+      const lastContentElement = contentEl.lastElementChild;
+      if (!lastContentElement) return;
+      const lastElementRect = lastContentElement.getBoundingClientRect();
+      const clickY = e.clientY;
+      if (clickY > lastElementRect.bottom + 5) {
+        e.preventDefault();
+        appendParagraphAtEnd();
+      }
+    }, true);
+    document.getElementById("editor").addEventListener("mousedown", (e) => {
+      const editorEl = document.getElementById("editor");
+      const contentEl = editorEl.querySelector(".tiptap-content");
+      if (!contentEl) return;
+      const lastContentElement = contentEl.lastElementChild;
+      if (!lastContentElement) return;
+      const lastElementRect = lastContentElement.getBoundingClientRect();
+      const editorRect = editorEl.getBoundingClientRect();
+      const clickY = e.clientY;
+      if (clickY > lastElementRect.bottom + 5 && clickY < editorRect.bottom) {
+        e.preventDefault();
+        e.stopPropagation();
+        appendParagraphAtEnd();
+      }
+    }, true);
+    function appendParagraphAtEnd() {
+      const { state } = editor;
+      const lastNode = state.doc.lastChild;
+      if (lastNode && lastNode.type.name === "paragraph" && lastNode.content.size === 0) {
+        editor.commands.focus("end");
+        return;
+      }
+      const endPos = state.doc.content.size;
+      editor.chain().focus().insertContentAt(endPos, { type: "paragraph" }).focus("end").run();
+    }
+    window.tiptap.appendParagraph = appendParagraphAtEnd;
   }
   document.addEventListener("click", (e) => {
     if (slashMenuVisible && slashMenuEl && !slashMenuEl.contains(e.target)) {

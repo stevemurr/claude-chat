@@ -17,6 +17,8 @@ struct TiptapEditorView: NSViewRepresentable {
         userContentController.add(context.coordinator, name: "contentChanged")
         userContentController.add(context.coordinator, name: "editorReady")
         userContentController.add(context.coordinator, name: "openLink")
+        userContentController.add(context.coordinator, name: "openGroup")
+        userContentController.add(context.coordinator, name: "navigateBack")
 
         config.userContentController = userContentController
         config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
@@ -69,6 +71,18 @@ struct TiptapEditorView: NSViewRepresentable {
                     if let urlString = message.body as? String,
                        let url = URL(string: urlString) {
                         NSWorkspace.shared.open(url)
+                    }
+
+                case "openGroup":
+                    if let groupData = message.body as? [String: Any],
+                       let groupId = groupData["id"] as? String,
+                       let groupTitle = groupData["title"] as? String {
+                        viewModel.navigateIntoGroup(id: groupId, title: groupTitle)
+                    }
+
+                case "navigateBack":
+                    if viewModel.groupNavigation.isInsideGroup {
+                        viewModel.navigateBack()
                     }
 
                 default:

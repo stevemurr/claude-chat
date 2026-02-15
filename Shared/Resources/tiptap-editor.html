@@ -425,6 +425,134 @@
     background: var(--border-color);
     margin: 4px 8px;
   }
+
+  /* --- Group/Page Cards --- */
+
+  .content-group {
+    margin: 12px 0;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-code);
+    overflow: hidden;
+  }
+
+  .content-group-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s ease;
+  }
+
+  .content-group-header:hover {
+    background: var(--slash-hover);
+  }
+
+  .content-group-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  .content-group-title {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .content-group-chevron {
+    font-size: 16px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    transition: transform 0.15s ease;
+  }
+
+  .content-group-header:hover .content-group-chevron {
+    transform: translateX(2px);
+  }
+
+  .content-group-content {
+    display: none; /* Hidden by default - content shown when navigated into */
+    padding: 12px 14px;
+    border-top: 1px solid var(--border-color);
+    pointer-events: none; /* Don't intercept clicks when hidden */
+  }
+
+  /* When editing inside a group (navigated in) */
+  .content-group.editing .content-group-content {
+    display: block;
+  }
+
+  .content-group.editing .content-group-header {
+    display: none;
+  }
+
+  /* --- Multi-Select Highlighting --- */
+
+  .multi-selected {
+    background: rgba(0, 122, 255, 0.12) !important;
+    border-radius: 4px;
+    outline: 2px solid rgba(0, 122, 255, 0.3);
+    outline-offset: 1px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .multi-selected {
+      background: rgba(10, 132, 255, 0.15) !important;
+      outline-color: rgba(10, 132, 255, 0.35);
+    }
+  }
+
+  /* --- Group Navigation Header --- */
+
+  .group-nav-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--bg-code);
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .group-nav-back {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: var(--accent-color);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  .group-nav-back:hover {
+    background: var(--slash-hover);
+  }
+
+  .group-nav-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+
+  .group-nav-breadcrumb-item {
+    color: var(--text-primary);
+    font-weight: 500;
+  }
 </style>
 </head>
 <body>

@@ -40,4 +40,12 @@ extension Color {
         Color(UIColor.systemBackground)
         #endif
     }
+
+    static var platformSecondaryBackground: Color {
+        #if os(macOS)
+        Color(NSColor.underPageBackgroundColor)
+        #else
+        Color(UIColor.secondarySystemBackground)
+        #endif
+    }
 }

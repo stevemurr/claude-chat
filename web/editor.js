@@ -9,8 +9,285 @@ import TableRow from '@tiptap/extension-table-row'
 import TableCell from '@tiptap/extension-table-cell'
 import TableHeader from '@tiptap/extension-table-header'
 import { Markdown } from 'tiptap-markdown'
-import { Extension } from '@tiptap/core'
+import { Extension, Node, mergeAttributes } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
+
+// --- GroupNode Extension ---
+// Custom node that renders as a clickable card for navigation
+
+const GroupNode = Node.create({
+  name: 'contentGroup',
+  group: 'block',
+  content: 'block+',
+  defining: true,
+
+  addAttributes() {
+    return {
+      id: {
+        default: null,
+        parseHTML: element => element.getAttribute('data-group-id'),
+        renderHTML: attributes => ({
+          'data-group-id': attributes.id,
+        }),
+      },
+      title: {
+        default: 'Untitled',
+        parseHTML: element => element.getAttribute('data-group-title'),
+        renderHTML: attributes => ({
+          'data-group-title': attributes.title,
+        }),
+      },
+    }
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: 'div[data-type="content-group"]',
+      },
+    ]
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['div', mergeAttributes(HTMLAttributes, {
+      'data-type': 'content-group',
+      class: 'content-group',
+    }), 0]
+  },
+
+  addNodeView() {
+    return ({ node, getPos, editor }) => {
+      const dom = document.createElement('div')
+      dom.className = 'content-group'
+      dom.setAttribute('data-type', 'content-group')
+      dom.setAttribute('data-group-id', node.attrs.id || '')
+
+      // Track current node (updated on each update call)
+      let currentNode = node
+
+      // Extract title from first line of content (strip markdown formatting)
+      const getFirstLineTitle = (groupNode) => {
+        let title = 'Untitled'
+        if (groupNode.content && groupNode.content.size > 0) {
+          const firstChild = groupNode.content.firstChild
+          if (firstChild) {
+            // Get text content of first block
+            let text = ''
+            firstChild.forEach(child => {
+              if (child.isText) {
+                text += child.text
+              }
+            })
+            text = text.trim()
+            // Strip markdown formatting
+            text = text
+              .replace(/^#{1,6}\s*/, '')  // Heading markers
+              .replace(/^\s*[-*+]\s*/, '') // List markers
+              .replace(/^\s*\d+\.\s*/, '') // Numbered list
+              .replace(/^\s*>\s*/, '')     // Blockquote
+              .replace(/\*\*([^*]+)\*\*/g, '$1') // Bold
+              .replace(/\*([^*]+)\*/g, '$1')     // Italic
+              .replace(/__([^_]+)__/g, '$1')     // Bold
+              .replace(/_([^_]+)_/g, '$1')       // Italic
+              .replace(/`([^`]+)`/g, '$1')       // Inline code
+              .trim()
+            if (text) {
+              // Truncate if too long
+              title = text.length > 50 ? text.substring(0, 50) + '…' : text
+            }
+          }
+        }
+        return title
+      }
+
+      const initialTitle = getFirstLineTitle(node)
+
+      // Create card header (visible in collapsed state)
+      const header = document.createElement('div')
+      header.className = 'content-group-header'
+      header.innerHTML = `
+        <span class="content-group-icon">📁</span>
+        <span class="content-group-title">${escapeHtml(initialTitle)}</span>
+        <span class="content-group-chevron">›</span>
+      `
+
+      // Handle click on header to navigate into group
+      header.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        const groupId = currentNode.attrs.id
+        const groupTitle = getFirstLineTitle(currentNode)
+        try {
+          webkit.messageHandlers.openGroup.postMessage({
+            id: groupId,
+            title: groupTitle,
+            pos: typeof getPos === 'function' ? getPos() : 0
+          })
+        } catch (err) {
+          console.log('openGroup:', groupId, groupTitle)
+        }
+      })
+
+      // Content wrapper (holds actual content when editing inside)
+      const contentWrapper = document.createElement('div')
+      contentWrapper.className = 'content-group-content'
+
+      dom.appendChild(header)
+      dom.appendChild(contentWrapper)
+
+      return {
+        dom,
+        contentDOM: contentWrapper,
+        update: (updatedNode) => {
+          if (updatedNode.type.name !== 'contentGroup') return false
+          // Update current node reference
+          currentNode = updatedNode
+          // Update title from first line of content
+          const titleEl = header.querySelector('.content-group-title')
+          if (titleEl) {
+            titleEl.textContent = getFirstLineTitle(updatedNode)
+          }
+          dom.setAttribute('data-group-id', updatedNode.attrs.id || '')
+          return true
+        },
+      }
+    }
+  },
+
+  addCommands() {
+    return {
+      insertGroup: (attrs = {}) => ({ chain, state }) => {
+        const id = attrs.id || generateUUID()
+        const title = attrs.title || 'Untitled'
+        return chain()
+          .insertContent({
+            type: 'contentGroup',
+            attrs: { id, title },
+            content: [{ type: 'paragraph' }],
+          })
+          .run()
+      },
+      setGroupTitle: (id, title) => ({ tr, state, dispatch }) => {
+        let found = false
+        state.doc.descendants((node, pos) => {
+          if (node.type.name === 'contentGroup' && node.attrs.id === id) {
+            if (dispatch) {
+              tr.setNodeMarkup(pos, null, { ...node.attrs, title })
+            }
+            found = true
+            return false
+          }
+        })
+        return found
+      },
+    }
+  },
+})
+
+// Helper to escape HTML
+function escapeHtml(text) {
+  const div = document.createElement('div')
+  div.textContent = text
+  return div.innerHTML
+}
+
+// Generate UUID for group IDs
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0
+    const v = c === 'x' ? r : (r & 0x3 | 0x8)
+    return v.toString(16)
+  })
+}
+
+// --- Group Selection Extension ---
+// Allows Cmd+G to group currently selected content
+
+const GroupSelectionExtension = Extension.create({
+  name: 'groupSelection',
+
+  addKeyboardShortcuts() {
+    return {
+      'Mod-g': ({ editor }) => {
+        return groupCurrentSelection(editor)
+      },
+      'Escape': () => {
+        // Try to navigate back if inside a group
+        try {
+          webkit.messageHandlers.navigateBack.postMessage(true)
+          return true
+        } catch (err) {
+          // Not in WKWebView context
+          return false
+        }
+      },
+    }
+  },
+})
+
+// Group the current text selection into a group
+function groupCurrentSelection(editor) {
+  const { state } = editor
+  const { selection, schema } = state
+  const { from, to } = selection
+
+  // Check if there's actually a selection (not just a cursor)
+  if (from === to) {
+    return false
+  }
+
+  // Find the range of top-level blocks that are fully or partially selected
+  const $from = state.doc.resolve(from)
+  const $to = state.doc.resolve(to)
+
+  // Get the start of the first block and end of the last block
+  let startPos = from
+  let endPos = to
+
+  // Find the first top-level block containing the selection start
+  for (let d = $from.depth; d >= 1; d--) {
+    if ($from.node(d - 1).type.name === 'doc') {
+      startPos = $from.before(d)
+      break
+    }
+  }
+
+  // Find the last top-level block containing the selection end
+  for (let d = $to.depth; d >= 1; d--) {
+    if ($to.node(d - 1).type.name === 'doc') {
+      endPos = $to.after(d)
+      break
+    }
+  }
+
+  // Get the content between these positions
+  const slice = state.doc.slice(startPos, endPos)
+  const content = slice.content
+
+  if (content.size === 0) {
+    return false
+  }
+
+  // Create the group node
+  const groupType = schema.nodes.contentGroup
+  if (!groupType) {
+    console.error('contentGroup node type not found in schema')
+    return false
+  }
+
+  const groupId = generateUUID()
+  const group = groupType.create(
+    { id: groupId, title: 'Untitled' },
+    content
+  )
+
+  // Replace the range with the group
+  const tr = state.tr.replaceWith(startPos, endPos, group)
+  editor.view.dispatch(tr)
+
+  return true
+}
 
 // --- Table Context Menu ---
 
@@ -153,6 +430,7 @@ const slashCommands = [
   { type: 'codeBlock', title: 'Code', icon: '</>', keywords: ['snippet', 'pre', 'mono', 'code'] },
   { type: 'horizontalRule', title: 'Divider', icon: '\u2014', keywords: ['hr', 'line', 'separator', 'divider'] },
   { type: 'table', title: 'Table', icon: '\u2637', keywords: ['table', 'grid', 'rows', 'columns', 'cells'] },
+  { type: 'group', title: 'Group', icon: '📁', keywords: ['group', 'page', 'folder', 'container', 'card'] },
 ]
 
 let slashMenuEl = null
@@ -270,6 +548,9 @@ function executeSlashCommand(cmd) {
       break
     case 'table':
       editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+      break
+    case 'group':
+      editor.chain().focus().insertGroup().run()
       break
   }
 
@@ -564,6 +845,24 @@ function serializeNode(node, context) {
       // These are handled by the table case
       return ''
 
+    case 'contentGroup': {
+      const groupId = node.attrs?.id || ''
+      const inner = serializeChildren(node.content, context)
+      // Derive title from first line of content, stripping markdown
+      const firstLine = inner.split('\n')[0] || ''
+      const title = firstLine
+        .replace(/^#{1,6}\s*/, '')      // Heading markers
+        .replace(/^\s*[-*+]\s*/, '')    // List markers
+        .replace(/^\s*\d+\.\s*/, '')    // Numbered list
+        .replace(/^\s*>\s*/, '')        // Blockquote
+        .replace(/\*\*([^*]+)\*\*/g, '$1') // Bold
+        .replace(/\*([^*]+)\*/g, '$1')     // Italic
+        .replace(/`([^`]+)`/g, '$1')       // Inline code
+        .trim()
+        .substring(0, 50) || 'Untitled'
+      return `<!-- group:${groupId}:${title} -->\n${inner}\n<!-- /group:${groupId} -->`
+    }
+
     default:
       // Fallback: serialize children or inline content
       if (node.content) {
@@ -639,6 +938,29 @@ const TableMarkdownFix = Extension.create({
   }
 })
 
+// --- Group Markdown Preprocessor ---
+// Converts <!-- group:id:title --> ... <!-- /group:id --> comments into parseable HTML
+
+function preprocessGroupMarkdown(markdown) {
+  // Match group start/end comments and wrap content in div
+  const groupStartRegex = /<!--\s*group:([^:]+):([^>]+?)\s*-->/g
+  const groupEndRegex = /<!--\s*\/group:([^>]+?)\s*-->/g
+
+  // First pass: find all group regions and build a tree structure
+  let result = markdown
+
+  // Replace start comments with opening div
+  result = result.replace(groupStartRegex, (match, id, title) => {
+    const escapedTitle = title.replace(/"/g, '&quot;')
+    return `<div data-type="content-group" data-group-id="${id}" data-group-title="${escapedTitle}">`
+  })
+
+  // Replace end comments with closing div
+  result = result.replace(groupEndRegex, '</div>')
+
+  return result
+}
+
 // --- Table Context Menu Extension ---
 
 const TableContextMenu = Extension.create({
@@ -695,7 +1017,7 @@ function initEditor() {
         placeholder: 'Type / for commands...',
       }),
       Markdown.configure({
-        html: false,
+        html: true,  // Required for group nodes to parse correctly
         transformCopiedText: true,
         transformPastedText: true,
       }),
@@ -713,6 +1035,8 @@ function initEditor() {
       TodoInputRule,
       TableContextMenu,
       TabIndentation,
+      GroupNode,
+      GroupSelectionExtension,
     ],
     autofocus: true,
     editorProps: {
@@ -739,7 +1063,9 @@ function initEditor() {
       if (!markdown || markdown.trim() === '') {
         editor.commands.clearContent()
       } else {
-        editor.commands.setContent(markdown)
+        // Preprocess group comments before parsing
+        const processed = preprocessGroupMarkdown(markdown)
+        editor.commands.setContent(processed)
       }
     },
     getContent() {
@@ -752,6 +1078,61 @@ function initEditor() {
       editor.commands.clearContent()
       editor.commands.focus()
     },
+    // Get the content of a specific group by ID
+    getGroupContent(groupId) {
+      const { state } = editor
+      let content = ''
+      state.doc.descendants((node, pos) => {
+        if (node.type.name === 'contentGroup' && node.attrs.id === groupId) {
+          // Serialize the content inside this group
+          const groupContent = { type: 'doc', content: [] }
+          node.forEach(child => {
+            groupContent.content.push(child.toJSON())
+          })
+          content = serializeChildren(groupContent.content, {})
+          return false // Stop searching
+        }
+      })
+      return content
+    },
+    // Update the content of a specific group by ID
+    updateGroupContent(groupId, newMarkdown) {
+      const { state } = editor
+      let found = false
+      state.doc.descendants((node, pos) => {
+        if (node.type.name === 'contentGroup' && node.attrs.id === groupId) {
+          // Parse the new markdown content
+          const tempEditor = new Editor({
+            extensions: editor.extensionManager.extensions,
+            content: preprocessGroupMarkdown(newMarkdown),
+          })
+          const newContent = tempEditor.state.doc.content
+          tempEditor.destroy()
+
+          // Replace the group's content
+          const tr = state.tr
+          const groupStart = pos + 1 // After opening tag
+          const groupEnd = pos + node.nodeSize - 1 // Before closing tag
+          tr.replaceWith(groupStart, groupEnd, newContent)
+          editor.view.dispatch(tr)
+          found = true
+          return false
+        }
+      })
+      return found
+    },
+    // Set the title of a group
+    setGroupTitle(groupId, title) {
+      return editor.commands.setGroupTitle(groupId, title)
+    },
+    // Navigate back (for keyboard shortcut - tells Swift to handle navigation)
+    navigateBack() {
+      try {
+        webkit.messageHandlers.navigateBack.postMessage(true)
+      } catch (err) {
+        console.log('navigateBack not available')
+      }
+    },
   }
 
   // Notify Swift that editor is ready
@@ -762,6 +1143,7 @@ function initEditor() {
   }
 
   // Handle link clicks - send to Swift to open in browser
+  // Also handle click-after-content to append
   document.getElementById('editor').addEventListener('click', (e) => {
     const link = e.target.closest('a')
     if (link && link.href) {
@@ -773,8 +1155,85 @@ function initEditor() {
         // Fallback for non-WKWebView context
         window.open(link.href, '_blank')
       }
+      return
+    }
+
+    // Check if click is below all content (in the padding area)
+    const editorEl = document.getElementById('editor')
+    const contentEl = editorEl.querySelector('.tiptap-content')
+    if (contentEl && e.target === editorEl) {
+      // Click was on the editor container itself, not on content
+      // Move cursor to end of document
+      editor.commands.focus('end')
     }
   })
+
+  // Handle clicks below content to allow easy appending
+  document.getElementById('editor').addEventListener('click', (e) => {
+    const editorEl = document.getElementById('editor')
+    const contentEl = editorEl.querySelector('.tiptap-content')
+
+    if (!contentEl) return
+
+    // Find the last actual content element (could be paragraph, heading, group, etc.)
+    const lastContentElement = contentEl.lastElementChild
+    if (!lastContentElement) return
+
+    const lastElementRect = lastContentElement.getBoundingClientRect()
+    const clickY = e.clientY
+
+    // If click is below the last content element
+    if (clickY > lastElementRect.bottom + 5) {
+      e.preventDefault()
+      appendParagraphAtEnd()
+    }
+  }, true) // Use capture phase
+
+  // Also handle mousedown for immediate response
+  document.getElementById('editor').addEventListener('mousedown', (e) => {
+    const editorEl = document.getElementById('editor')
+    const contentEl = editorEl.querySelector('.tiptap-content')
+
+    if (!contentEl) return
+
+    // Find the last actual content element
+    const lastContentElement = contentEl.lastElementChild
+    if (!lastContentElement) return
+
+    const lastElementRect = lastContentElement.getBoundingClientRect()
+    const editorRect = editorEl.getBoundingClientRect()
+    const clickY = e.clientY
+
+    // If click is in the padding area below last element
+    if (clickY > lastElementRect.bottom + 5 && clickY < editorRect.bottom) {
+      e.preventDefault()
+      e.stopPropagation()
+      appendParagraphAtEnd()
+    }
+  }, true) // Use capture phase
+
+  // Helper to append paragraph at end and focus
+  function appendParagraphAtEnd() {
+    const { state } = editor
+    const lastNode = state.doc.lastChild
+
+    // If last node is empty paragraph, just focus
+    if (lastNode && lastNode.type.name === 'paragraph' && lastNode.content.size === 0) {
+      editor.commands.focus('end')
+      return
+    }
+
+    // If last node is a group or any other block, insert a new paragraph after it
+    const endPos = state.doc.content.size
+    editor.chain()
+      .focus()
+      .insertContentAt(endPos, { type: 'paragraph' })
+      .focus('end')
+      .run()
+  }
+
+  // Also expose for external use (e.g., from Swift)
+  window.tiptap.appendParagraph = appendParagraphAtEnd
 }
 
 // Handle click outside menus to dismiss

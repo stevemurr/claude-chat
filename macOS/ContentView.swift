@@ -669,31 +669,40 @@ struct ChatMessageBlock: View {
     }
 
     private var regularMessageView: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Label(
-                    message.role == .user ? "You" : "Claude",
-                    systemImage: message.role == .user ? "person.fill" : "sparkles"
-                )
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.secondary)
+        HStack(alignment: .top, spacing: 0) {
+            // Colored accent bar
+            RoundedRectangle(cornerRadius: 2)
+                .fill(roleAccentColor)
+                .frame(width: 3)
+                .padding(.vertical, 2)
 
-                Spacer()
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Label(
+                        message.role == .user ? "You" : "Claude",
+                        systemImage: message.role == .user ? "person.fill" : "sparkles"
+                    )
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(roleAccentColor)
 
-                Button(action: copyToClipboard) {
-                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 9))
-                        .foregroundColor(copied ? .green : .secondary)
+                    Spacer()
+
+                    Button(action: copyToClipboard) {
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 10))
+                            .foregroundColor(copied ? .green : .secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
-            }
 
-            Markdown(message.content)
-                .textSelection(.enabled)
-                .markdownTheme(.chatSidebar)
-                .font(.system(size: 12))
+                Markdown(message.content)
+                    .textSelection(.enabled)
+                    .markdownTheme(.chatSidebar)
+            }
+            .padding(.leading, 10)
+            .padding(.trailing, 12)
+            .padding(.vertical, 10)
         }
-        .padding(10)
         .background(backgroundColor)
         .cornerRadius(8)
         .overlay(
@@ -702,9 +711,15 @@ struct ChatMessageBlock: View {
         )
     }
 
+    private var roleAccentColor: Color {
+        message.role == .user
+            ? Color.blue
+            : Color.orange
+    }
+
     private var backgroundColor: Color {
         message.role == .user
-            ? Color.accentColor.opacity(0.1)
+            ? Color.blue.opacity(0.06)
             : Color(NSColor.controlBackgroundColor)
     }
 
@@ -727,40 +742,50 @@ struct ToolResultBlock: View {
     @State private var isExpanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header - always visible
-            Button(action: { withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() } }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "wrench.fill")
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
+        HStack(alignment: .top, spacing: 0) {
+            // Colored accent bar (purple for tools)
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color.purple)
+                .frame(width: 3)
+                .padding(.vertical, 2)
 
-                    Text(toolName)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.primary)
+            VStack(alignment: .leading, spacing: 0) {
+                // Header - always visible
+                Button(action: { withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() } }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "wrench.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(.purple)
 
-                    Spacer()
+                        Text(toolName)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.primary)
 
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.secondary)
+                        Spacer()
+
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.leading, 10)
+                    .padding(.trailing, 12)
+                    .padding(.vertical, 10)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+                .buttonStyle(.plain)
 
-            // Expanded content
-            if isExpanded {
-                Divider()
-                    .padding(.horizontal, 10)
+                // Expanded content
+                if isExpanded {
+                    Divider()
+                        .padding(.horizontal, 10)
 
-                Markdown(output)
-                    .textSelection(.enabled)
-                    .markdownTheme(.chatSidebar)
-                    .font(.system(size: 11))
-                    .padding(10)
+                    Markdown(output)
+                        .textSelection(.enabled)
+                        .markdownTheme(.chatSidebar)
+                        .padding(.leading, 10)
+                        .padding(.trailing, 12)
+                        .padding(.vertical, 10)
+                }
             }
         }
         .background(Color(NSColor.controlBackgroundColor).opacity(0.7))
@@ -779,39 +804,48 @@ struct StreamingBlock: View {
     let isWorking: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Label("Claude", systemImage: "sparkles")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.secondary)
-                Spacer()
+        HStack(alignment: .top, spacing: 0) {
+            // Colored accent bar (orange for Claude)
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color.orange)
+                .frame(width: 3)
+                .padding(.vertical, 2)
 
-                HStack(spacing: 4) {
-                    ProgressView()
-                        .scaleEffect(0.5)
-                    Text(isWorking ? "Working..." : "Streaming")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Label("Claude", systemImage: "sparkles")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.orange)
+                    Spacer()
+
+                    HStack(spacing: 4) {
+                        ProgressView()
+                            .scaleEffect(0.5)
+                        Text(isWorking ? "Working..." : "Streaming")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                if text.isEmpty {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                        Text(isWorking ? "Running tools..." : "Thinking...")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                } else {
+                    Markdown(text)
+                        .textSelection(.enabled)
+                        .markdownTheme(.chatSidebar)
                 }
             }
-
-            if text.isEmpty {
-                HStack(spacing: 6) {
-                    ProgressView()
-                        .scaleEffect(0.6)
-                    Text(isWorking ? "Running tools..." : "Thinking...")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
-                .padding(.vertical, 4)
-            } else {
-                Markdown(text)
-                    .textSelection(.enabled)
-                    .markdownTheme(.chatSidebar)
-                    .font(.system(size: 12))
-            }
+            .padding(.leading, 10)
+            .padding(.trailing, 12)
+            .padding(.vertical, 10)
         }
-        .padding(10)
         .background(Color(NSColor.controlBackgroundColor))
         .cornerRadius(8)
         .overlay(
@@ -881,19 +915,19 @@ struct InputArea: View {
 extension MarkdownUI.Theme {
     static let chatSidebar = Theme()
         .text {
-            FontSize(12)
+            FontSize(14)
             ForegroundColor(.primary)
         }
         .code {
             FontFamilyVariant(.monospaced)
-            FontSize(11)
+            FontSize(12)
             BackgroundColor(Color(NSColor.controlBackgroundColor))
         }
         .codeBlock { configuration in
             ScrollView(.horizontal, showsIndicators: false) {
                 configuration.label
                     .fontDesign(.monospaced)
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .padding(10)
             }
             .background(Color(NSColor.controlBackgroundColor))
@@ -908,7 +942,7 @@ extension MarkdownUI.Theme {
                 .markdownMargin(top: 12, bottom: 6)
                 .markdownTextStyle {
                     FontWeight(.bold)
-                    FontSize(16)
+                    FontSize(18)
                 }
         }
         .heading2 { configuration in
@@ -916,7 +950,7 @@ extension MarkdownUI.Theme {
                 .markdownMargin(top: 10, bottom: 4)
                 .markdownTextStyle {
                     FontWeight(.semibold)
-                    FontSize(14)
+                    FontSize(16)
                 }
         }
         .heading3 { configuration in
@@ -924,7 +958,7 @@ extension MarkdownUI.Theme {
                 .markdownMargin(top: 8, bottom: 4)
                 .markdownTextStyle {
                     FontWeight(.semibold)
-                    FontSize(13)
+                    FontSize(15)
                 }
         }
         .listItem { configuration in

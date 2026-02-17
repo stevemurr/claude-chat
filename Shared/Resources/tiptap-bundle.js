@@ -22209,23 +22209,664 @@ img.ProseMirror-separator {
     }
   });
 
-  // node_modules/@tiptap/extension-table-row/dist/index.js
-  var TableRow = Node3.create({
-    name: "tableRow",
-    addOptions() {
-      return {
-        HTMLAttributes: {}
-      };
-    },
-    content: "(tableCell | tableHeader)*",
-    tableRole: "row",
+  // node_modules/tiptap-table-plus/dist/pagination/TableRowGroup.js
+  var TableRowGroup = Node3.create({
+    name: "tableRowGroup",
+    group: "tableRowGroup",
+    content: "tableRow+",
+    tableRole: "table",
     parseHTML() {
       return [
-        { tag: "tr" }
+        {
+          tag: "tbody"
+        }
       ];
     },
-    renderHTML({ HTMLAttributes }) {
-      return ["tr", mergeAttributes(this.options.HTMLAttributes, HTMLAttributes), 0];
+    addNodeView() {
+      return ({ node }) => {
+        const dom = document.createElement("div");
+        dom.classList.add("table-row-group");
+        const tbody = document.createElement("tbody");
+        dom.appendChild(tbody);
+        return { dom, contentDOM: tbody };
+      };
+    },
+    renderHTML() {
+      const table2 = ["tbody", {}, 0];
+      return table2;
+    },
+    addProseMirrorPlugins() {
+      const { editor } = this;
+      return [
+        new Plugin({
+          key: new PluginKey("tableRowGroupKey"),
+          appendTransaction(_, oldState, newState) {
+            const { doc: doc3, tr: tr2 } = newState;
+            let modified = false;
+            doc3.descendants((tableNode, pos) => {
+              if (tableNode.type.name !== "table")
+                return false;
+              const rowGroups = [];
+              const rows = [];
+              const oldRowGroupStructure = {};
+              tableNode.forEach((child, childOffset, childIndex) => {
+                if (child.type.name === "tableRowGroup") {
+                  oldRowGroupStructure[childIndex] = child.childCount;
+                  child.forEach((row) => {
+                    if (row.type.name === "tableRow") {
+                      rows.push(row);
+                    }
+                  });
+                } else if (child.type.name === "tableRow") {
+                  oldRowGroupStructure[childIndex] = 1;
+                  rows.push(child);
+                }
+              });
+              let rowSpanList = {};
+              for (let i = 0; i < rows.length; i++) {
+                rowSpanList[i + 1] = getMaximumRowSpan(rows[i]);
+              }
+              const rowGroupList = mergeOverlappingGroups(getRowGroupList(rows.length, rowSpanList));
+              const newRowGroupStructure = Object.assign({}, rowGroupList.map((group) => group.length));
+              if (!deepMatch(oldRowGroupStructure, newRowGroupStructure)) {
+                const nodeType = editor.schema.nodes.tableRowGroup;
+                const rowGroupMoreThanOne = rowGroupList.findIndex((group) => group.length > 1);
+                for (let i = 0; i < rowGroupList.length; i++) {
+                  const rowGroup = rows.slice(Math.min(...rowGroupList[i]) - 1, Math.max(...rowGroupList[i]));
+                  if (rowGroup.length > 0) {
+                    if (rowGroupMoreThanOne !== -1) {
+                      rowGroups.push(nodeType.createAndFill(null, rowGroup));
+                    } else {
+                      rowGroups.push(rowGroup[0]);
+                    }
+                  }
+                }
+                const tableNodeType = editor.schema.nodes.table;
+                const tableNodeNew = tableNodeType.createAndFill(null, rowGroups);
+                tr2.replaceWith(pos, pos + tableNode.nodeSize, tableNodeNew);
+                modified = true;
+              }
+              return false;
+            });
+            return modified ? tr2 : null;
+          }
+        })
+      ];
+    }
+  });
+  var getMaximumRowSpan = (row) => {
+    let maxRowSpan = 0;
+    row.forEach((child) => {
+      const rowspan = child.attrs.rowspan || 1;
+      if (rowspan > maxRowSpan) {
+        maxRowSpan = rowspan;
+      }
+    });
+    return maxRowSpan;
+  };
+  function deepMatch(obj1, obj2) {
+    if (typeof obj1 !== "object" || obj1 === null || typeof obj2 !== "object" || obj2 === null) {
+      return obj1 === obj2;
+    }
+    const keys1 = Object.keys(obj1);
+    const keys2 = Object.keys(obj2);
+    if (keys1.length !== keys2.length) {
+      return false;
+    }
+    for (let key of keys1) {
+      if (!obj2.hasOwnProperty(key) || !deepMatch(obj1[key], obj2[key])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  var getRowGroupList = (totalRows, rowSpanList) => {
+    const rowGroupListWithRowCount = [];
+    for (let i = 1; i <= totalRows; i++) {
+      const span = rowSpanList[i] || 1;
+      const group = [];
+      for (let j = 0; j < span && i + j <= totalRows; j++) {
+        group.push(i + j);
+      }
+      rowGroupListWithRowCount.push(group);
+    }
+    return rowGroupListWithRowCount;
+  };
+  var mergeOverlappingGroups = (inputGroups) => {
+    const result = [];
+    for (const group of inputGroups) {
+      let merged = false;
+      const groupSet = new Set(group);
+      for (let i = 0; i < result.length; i++) {
+        const existingSet = new Set(result[i]);
+        const intersection = Array.from(groupSet).some((val) => existingSet.has(val));
+        if (intersection) {
+          result[i] = Array.from(/* @__PURE__ */ new Set([...result[i], ...group]));
+          merged = true;
+          break;
+        }
+      }
+      if (!merged) {
+        result.push([...group]);
+      }
+    }
+    const allSets = result.map((g) => new Set(g));
+    for (let i = 0; i < allSets.length; i++) {
+      for (let j = i + 1; j < allSets.length; j++) {
+        const overlap = Array.from(allSets[i]).some((val) => allSets[j].has(val));
+        if (overlap) {
+          return mergeOverlappingGroups(result.map((g) => [...g]));
+        }
+      }
+    }
+    return result.map((g) => Array.from(new Set(g)).sort((a, b) => a - b));
+  };
+
+  // node_modules/tiptap-table-plus/dist/utilities/addDuplicateColumn.js
+  function addDuplicateColumn(tr2, { map: map3, tableStart, table: table2 }, col, withContent = true) {
+    let refColumn = col > 0 ? -1 : 0;
+    if (columnIsHeader(map3, table2, col + refColumn)) {
+      refColumn = col == 0 || col == map3.width ? null : 0;
+    }
+    for (let row = 0; row < map3.height; row++) {
+      const index2 = row * map3.width + col;
+      if (col > 0 && col < map3.width && map3.map[index2 - 1] == map3.map[index2]) {
+        const pos = map3.map[index2];
+        const cell = table2.nodeAt(pos);
+        tr2.setNodeMarkup(tr2.mapping.map(tableStart + pos), null, addColSpan(cell.attrs, col - map3.colCount(pos)));
+        row += cell.attrs.rowspan - 1;
+      } else {
+        const _refColumn = refColumn == null ? null : table2.nodeAt(map3.map[index2 + refColumn]);
+        const type = refColumn == null ? tableNodeTypes(table2.type.schema).cell : table2.nodeAt(map3.map[index2 + refColumn]).type;
+        const pos = map3.positionAt(row, col, table2);
+        tr2.insert(tr2.mapping.map(tableStart + pos), _refColumn !== null ? withContent ? type.create(Object.assign({}, _refColumn.attrs), _refColumn.content) : type.createAndFill(Object.assign({}, _refColumn.attrs)) : type.createAndFill());
+      }
+    }
+    return tr2;
+  }
+
+  // node_modules/tiptap-table-plus/dist/commands/duplicateColumn.js
+  var duplicateColumn = (state, dispatch, withContent = true) => {
+    if (!isInTable(state))
+      return false;
+    if (dispatch) {
+      const rect = selectedRect(state);
+      dispatch(addDuplicateColumn(state.tr, rect, rect.right, withContent));
+    }
+    return true;
+  };
+  var duplicateColumn_default = duplicateColumn;
+
+  // node_modules/tiptap-table-plus/dist/utilities/addDuplicateRow.js
+  function addDuplicateRow(tr2, { map: map3, tableStart, table: table2 }, row, withContent = true) {
+    var _a2;
+    let rowPos = tableStart;
+    for (let i = 0; i < row; i++)
+      rowPos += table2.child(i).nodeSize;
+    const cells = [];
+    let refRow = row > 0 ? -1 : 0;
+    for (let col = 0, index2 = map3.width * row; col < map3.width; col++, index2++) {
+      if (row > 0 && row < map3.height && map3.map[index2] == map3.map[index2 - map3.width]) {
+        const pos = map3.map[index2];
+        const attrs2 = table2.nodeAt(pos).attrs;
+        tr2.setNodeMarkup(tableStart + pos, null, Object.assign(Object.assign({}, attrs2), { rowspan: attrs2.rowspan + 1 }));
+        col += attrs2.colspan - 1;
+      } else {
+        const _refRow = !Array.isArray(map3.map) || refRow == null || !(index2 + refRow * map3.width in map3.map) ? null : table2.nodeAt(map3.map[index2 + refRow * map3.width]);
+        const type = refRow == null ? tableNodeTypes(table2.type.schema).cell : (_a2 = table2.nodeAt(map3.map[index2 + refRow * map3.width])) === null || _a2 === void 0 ? void 0 : _a2.type;
+        const node = _refRow !== null ? withContent ? type === null || type === void 0 ? void 0 : type.create(Object.assign({}, _refRow.attrs), _refRow.content) : type === null || type === void 0 ? void 0 : type.createAndFill(Object.assign({}, _refRow.attrs)) : type === null || type === void 0 ? void 0 : type.createAndFill();
+        if (node)
+          cells.push(node);
+      }
+    }
+    tr2.insert(rowPos, tableNodeTypes(table2.type.schema).row.create(null, cells));
+    return tr2;
+  }
+
+  // node_modules/tiptap-table-plus/dist/commands/duplicateRow.js
+  var duplicateRow = (state, dispatch, withContent = true) => {
+    if (!isInTable(state))
+      return false;
+    if (dispatch) {
+      const rect = selectedRect(state);
+      dispatch(addDuplicateRow(state.tr, rect, rect.bottom, withContent));
+    }
+    return true;
+  };
+  var duplicateRow_default = duplicateRow;
+
+  // node_modules/tiptap-table-plus/dist/TableCommandExtension.js
+  var TableCommandExtension = Extension.create({
+    name: "tableCommandExtension",
+    addCommands() {
+      return {
+        duplicateColumn: (withContent = true) => ({ state, dispatch }) => {
+          duplicateColumn_default(state, dispatch, withContent);
+          return true;
+        },
+        duplicateRow: (withContent = true) => ({ state, dispatch }) => {
+          duplicateRow_default(state, dispatch, withContent);
+          return true;
+        }
+      };
+    }
+  });
+  var TableCommandExtension_default = TableCommandExtension;
+
+  // node_modules/tiptap-table-plus/dist/pagination/TablePlusNodeView.js
+  var TablePlusNodeView = class {
+    constructor(node, getPos, editor, options) {
+      this.node = node;
+      this.columnSize = node.attrs.columnSize;
+      this.getPos = getPos;
+      this.editor = editor;
+      this.options = options;
+      this.dom = document.createElement("div");
+      this.dom.style.position = "relative";
+      this.maxCellCount = 0;
+      this.cellPercentage = [];
+      this.handles = [];
+      this.slider = document.createElement("div");
+      this.slider.contentEditable = "false";
+      this.slider.style.width = "100%";
+      this.slider.style.position = "relative";
+      this.dom.appendChild(this.slider);
+      this.updateNode(node);
+      this.contentDOM = document.createElement("table");
+      this.contentDOM.classList.add("table-plus");
+      this.contentDOM.style.flex = "1";
+      this.dom.appendChild(this.contentDOM);
+    }
+    addHandles() {
+      const dragHandle = (handle) => {
+        var _a2;
+        let startX = 0;
+        let handleIndex = parseInt((_a2 = handle.dataset.index) !== null && _a2 !== void 0 ? _a2 : "0");
+        const onMouseMove = (e) => {
+          let rect = this.slider.getBoundingClientRect();
+          let x = e.clientX - rect.left;
+          x = x < this.options.minColumnSize ? this.options.minColumnSize : x;
+          let percent = Math.min(Math.max(x / rect.width * 100, 0), 100);
+          if (handleIndex > 0) {
+            let previousPixel = parseFloat(this.handles[handleIndex - 1].style.left) * x / percent + this.options.minColumnSize;
+            if (x < previousPixel) {
+              percent = Math.min(Math.max(previousPixel / rect.width * 100, 0), 100);
+            }
+            percent = Math.max(percent, parseFloat(this.handles[handleIndex - 1].style.left));
+          }
+          if (handleIndex < this.handles.length - 1) {
+            let nextPixel = parseFloat(this.handles[handleIndex + 1].style.left) * x / percent - this.options.minColumnSize;
+            if (x > nextPixel) {
+              percent = Math.min(Math.max(nextPixel / rect.width * 100, 0), 100);
+            }
+            percent = Math.min(percent, parseFloat(this.handles[handleIndex + 1].style.left));
+          }
+          handle.style.left = percent + "%";
+          this.updateValues(this.getColumnSizes(this.handles), false);
+        };
+        const onMouseUp = () => {
+          document.removeEventListener("mousemove", onMouseMove);
+          document.removeEventListener("mouseup", onMouseUp);
+          this.updateValues(this.getColumnSizes(this.handles), true);
+        };
+        handle.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          startX = e.clientX;
+          document.addEventListener("mousemove", onMouseMove);
+          document.addEventListener("mouseup", onMouseUp);
+        });
+      };
+      let lastValue = 0;
+      for (let index2 = 0; index2 < this.cellPercentage.length; index2++) {
+        lastValue = lastValue + this.cellPercentage[index2];
+        if (index2 >= this.handles.length) {
+          const handle = document.createElement("div");
+          handle.className = "handle";
+          handle.style.position = "absolute";
+          handle.style.top = "50%";
+          handle.style.width = "12px";
+          handle.style.height = "12px";
+          handle.style.zIndex = "9999";
+          handle.style.borderRadius = "50%";
+          handle.style.transform = "translate(-50%, -50%)";
+          handle.style.cursor = "ew-resize";
+          Object.assign(handle.style, Object.assign({}, this.options.resizeHandleStyle));
+          handle.dataset.index = index2.toString();
+          handle.style.left = `${lastValue}%`;
+          this.slider.appendChild(handle);
+          this.handles.push(handle);
+          dragHandle(handle);
+        }
+      }
+    }
+    removeHandles() {
+      if (this.handles.length > this.cellPercentage.length) {
+        const handle = this.handles[this.handles.length - 1];
+        if (!handle)
+          return;
+        this.slider.removeChild(handle);
+        this.handles.splice(this.handles.length - 1, 1);
+        this.handles.forEach((h, i) => {
+          h.dataset.index = i.toString();
+        });
+      }
+    }
+    updateHandlePositions() {
+      let lastValue = 0;
+      for (let index2 = 0; index2 < this.cellPercentage.length; index2++) {
+        lastValue = lastValue + this.cellPercentage[index2];
+        this.handles[index2].style.left = `${lastValue}%`;
+      }
+    }
+    updateHandles() {
+      if (this.handles.length < this.cellPercentage.length) {
+        this.addHandles();
+      }
+      if (this.handles.length > this.cellPercentage.length) {
+        this.removeHandles();
+      }
+      this.updateHandlePositions();
+    }
+    updateNode(node) {
+      this.columnSize = node.attrs.columnSize;
+      let _maxCellCount = 0;
+      node.forEach((child) => {
+        if (child.type.name === "tableRowGroup") {
+          child.forEach((row) => {
+            if (row.type.name === "tableRow") {
+              if (row.childCount > _maxCellCount) {
+                _maxCellCount = row.childCount;
+              }
+            }
+          });
+        } else if (child.type.name === "tableRow") {
+          if (child.childCount > _maxCellCount) {
+            _maxCellCount = child.childCount;
+          }
+        }
+      });
+      this.maxCellCount = _maxCellCount;
+      function getColumnSizeList2(columnSize2) {
+        const arr = columnSize2.split(",").map((str) => str.trim());
+        const numbers = arr.every((item) => item !== "" && !isNaN(Number(item))) ? arr.map(Number) : [];
+        return numbers;
+      }
+      this.dom.style.setProperty("--cell-count", this.maxCellCount.toString());
+      this.cellPercentage = Array(this.maxCellCount).fill(Math.floor(100 / this.maxCellCount));
+      const columnSize = getColumnSizeList2(this.columnSize);
+      if (columnSize.length == this.maxCellCount) {
+        this.cellPercentage = columnSize;
+      }
+      this.dom.style.setProperty("--cell-percentage", this.cellPercentage.map((a) => `${a}%`).join(" "));
+      this.updateHandles();
+    }
+    getColumnSizes(handles) {
+      const values = handles.map((h) => Math.round(parseFloat(h.style.left) * 100) / 100);
+      let counted = 0;
+      let _values = [];
+      for (let i = 0; i < values.length; i++) {
+        _values.push(Math.round((values[i] - counted) * 100) / 100);
+        counted = values[i];
+      }
+      return _values;
+    }
+    updateValues(_values, updateNode = false) {
+      this.dom.style.setProperty("--cell-percentage", _values.map((a) => `${a}%`).join(" "));
+      if (updateNode) {
+        this.editor.commands.command(({ tr: tr2 }) => {
+          const pos = this.getPos();
+          if (typeof pos !== "number") {
+            return false;
+          }
+          tr2.setNodeMarkup(pos, void 0, Object.assign(Object.assign({}, this.node.attrs), { columnSize: _values.map((a) => a.toString()).join(",") }));
+          return true;
+        });
+      }
+    }
+    getContentDOM() {
+      return this.contentDOM;
+    }
+    update(node) {
+      if (node.type.name === this.node.type.name) {
+        this.updateNode(node);
+      }
+      this.node = node;
+      return true;
+    }
+    ignoreMutation() {
+      return true;
+    }
+  };
+
+  // node_modules/tiptap-table-plus/dist/utilities/utils.js
+  function findParentNodeOfTypeAtPos(pos, doc3, nodeType) {
+    const $pos = doc3.resolve(pos);
+    for (let depth = $pos.depth; depth > 0; depth--) {
+      const node = $pos.node(depth);
+      if (node.type === nodeType) {
+        return { node, pos: $pos.before(depth) };
+      }
+    }
+    return null;
+  }
+  function findParentNodeOfType(state, pos, nodeType) {
+    const $pos = state.doc.resolve(pos);
+    for (let depth = $pos.depth; depth > 0; depth--) {
+      const node = $pos.node(depth);
+      if (node.type === nodeType) {
+        return {
+          node,
+          depth,
+          start: $pos.start(depth),
+          end: $pos.end(depth),
+          pos: depth > 0 ? $pos.before(depth + 1) : 0
+        };
+      }
+    }
+    return null;
+  }
+  function isNodeAtRange(state, from2, to, nodeTypes) {
+    let found2 = false;
+    state.doc.descendants((node, pos) => {
+      if (!nodeTypes.includes(node.type.name))
+        return true;
+      if (pos !== from2)
+        return true;
+      if (pos + node.nodeSize !== to)
+        return true;
+      found2 = true;
+      return false;
+    });
+    return found2;
+  }
+  function getColumnSizeList(columnSize) {
+    const arr = columnSize.split(",").map((str) => str.trim());
+    const numbers = arr.every((item) => item !== "" && !isNaN(Number(item))) ? arr.map(Number) : [];
+    return numbers;
+  }
+  function addColumns(widths, newWidths) {
+    const totalExisting = widths.reduce((a, b) => a + b, 0);
+    const totalNew = newWidths.reduce((a, b) => a + b, 0);
+    const remaining = 100 - totalNew;
+    if (remaining < 0) {
+      throw new Error("New widths exceed 100%");
+    }
+    const scaled = totalExisting > 0 ? widths.map((w) => w / totalExisting * remaining) : [];
+    return [...scaled, ...newWidths];
+  }
+  function calculateNewColumnWidth(widths, newColumnCount = 1) {
+    const columns = widths.length + newColumnCount;
+    return 100 / columns;
+  }
+
+  // node_modules/tiptap-table-plus/dist/pagination/TablePlus.js
+  var TablePlus = Table.extend({
+    content: "(tableRowGroup|tableRow)+",
+    addOptions() {
+      var _a2;
+      return Object.assign(Object.assign({}, (_a2 = this.parent) === null || _a2 === void 0 ? void 0 : _a2.call(this)), { resizeHandleStyle: {
+        background: "#353535"
+      }, minColumnSize: 50, borderColor: "black" });
+    },
+    addExtensions() {
+      return [
+        TableRowGroup,
+        TableCommandExtension
+      ];
+    },
+    addAttributes() {
+      var _a2;
+      return Object.assign(Object.assign({}, (_a2 = this.parent) === null || _a2 === void 0 ? void 0 : _a2.call(this)), { columnSize: {
+        default: "",
+        parseHTML: (element) => {
+          let columnSize = element.getAttribute("data-column-size") || "";
+          let columnSizeList = columnSize.split(",");
+          const isAllNumber = columnSizeList.every((a) => !isNaN(Number(a)));
+          if (!isAllNumber) {
+            columnSizeList = [];
+          }
+          return columnSizeList.join(",");
+        },
+        renderHTML: (attributes) => {
+          return {
+            "data-column-size": attributes.columnSize
+          };
+        }
+      } });
+    },
+    renderHTML({ node, HTMLAttributes }) {
+      const table2 = [
+        "table",
+        mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, {
+          border: 1
+        }),
+        0
+      ];
+      return table2;
+    },
+    addNodeView() {
+      return ({ node, getPos, editor }) => new TablePlusNodeView(node, getPos, editor, this.options);
+    },
+    addProseMirrorPlugins() {
+      return [
+        new Plugin({
+          key: new PluginKey("tablePlusPlugin"),
+          appendTransaction: (transactions, oldState, newState) => {
+            let tr2 = newState.tr;
+            let isThereUpdate = false;
+            let position = 0;
+            let newStateTable = [];
+            transactions.forEach((transaction) => {
+              if (transaction.steps.length > 0) {
+                let tables = [];
+                const _steps = transaction.steps.filter((step) => {
+                  if (!(step instanceof ReplaceStep))
+                    return false;
+                  let currentPosition = step.slice.content.size - (step.to - step.from);
+                  position = position + currentPosition;
+                  let _from = step.from - (position - currentPosition);
+                  let _to = step.to - (position - currentPosition);
+                  if (oldState.doc.content.size < _from || oldState.doc.content.size < _to || (_from < 0 || _to < 0))
+                    return false;
+                  let _table = findParentNodeOfType(oldState, _from, this.type);
+                  if (!_table)
+                    return false;
+                  let tableAlreadyExist = tables.find((table2) => table2.start === _table.start);
+                  if (!tableAlreadyExist) {
+                    tables.push({ start: _table.start, node: _table.node });
+                  }
+                  let isAdd = false;
+                  if (step.slice.content && "content" in step.slice.content && step.slice.content.content && step.slice.content.content.length > 0) {
+                    isAdd = step.slice.content.content.every((node) => ["tableCell", "tableHeader"].includes(node.type.name));
+                  }
+                  if (isAdd)
+                    return true;
+                  let isRemove = isNodeAtRange(oldState, _from, _to, [
+                    "tableCell",
+                    "tableHeader"
+                  ]);
+                  if (isRemove)
+                    return true;
+                  return false;
+                });
+                if (_steps.length > 0 && tables.length == 1) {
+                  let position2 = 0;
+                  _steps.forEach((step) => {
+                    if (!(step instanceof ReplaceStep))
+                      return false;
+                    let currentPosition = step.slice.content.size - (step.to - step.from);
+                    position2 = position2 + currentPosition;
+                    let _from = step.from - (position2 - currentPosition);
+                    let _to = step.to - (position2 - currentPosition);
+                    let _table = findParentNodeOfType(oldState, _from, this.type);
+                    let newStateTable2 = findParentNodeOfTypeAtPos(step.from, newState.doc, this.type);
+                    if (!_table || !newStateTable2)
+                      return false;
+                    let tableRow = {
+                      from: 0,
+                      to: 0,
+                      node: null
+                    };
+                    oldState.doc.nodesBetween(_table.start, _table.end, (node, pos) => {
+                      if (node.type.name === "tableRow" && (tableRow.node == null || tableRow.node.childCount < node.childCount)) {
+                        tableRow = {
+                          from: pos,
+                          to: pos + node.nodeSize,
+                          node
+                        };
+                        return true;
+                      }
+                    });
+                    if (tableRow.node == null)
+                      return;
+                    if (_from >= tableRow.from && _to <= tableRow.to) {
+                      let columnSize = getColumnSizeList(_table.node.attrs.columnSize);
+                      let letCellList = [];
+                      oldState.doc.nodesBetween(tableRow.from, tableRow.to, (node, pos) => {
+                        if (node.type.name === "tableCell" || node.type.name === "tableHeader") {
+                          letCellList.push({ node, from: pos, to: pos + node.nodeSize });
+                          return true;
+                        }
+                      });
+                      if (letCellList.length == columnSize.length) {
+                        let removeFromToIndex = { from: 0, count: 0 };
+                        if (step.to > step.from) {
+                          let removeCellIndex = [];
+                          letCellList.forEach((cell, index2) => {
+                            if (cell.from >= step.from && cell.to <= step.to) {
+                              removeCellIndex.push(index2);
+                            }
+                          });
+                          removeFromToIndex = { from: Math.min(...removeCellIndex), count: removeCellIndex.length };
+                        }
+                        let addNodes = [];
+                        if (step.slice.content && "content" in step.slice.content && step.slice.content.content && step.slice.content.content.length > 0) {
+                          addNodes = step.slice.content.content.filter((node) => ["tableCell", "tableHeader"].includes(node.type.name));
+                        }
+                        let columnAfterRemove = columnSize.slice(0, removeFromToIndex.from).concat(columnSize.slice(removeFromToIndex.from + removeFromToIndex.count));
+                        let newColumnWidth = addNodes.length > 0 ? Array(addNodes.length).fill(calculateNewColumnWidth(columnAfterRemove, addNodes.length)) : [];
+                        let newColumnSize = addColumns(columnAfterRemove, newColumnWidth);
+                        newState.doc.descendants((node, pos) => {
+                          if (node.type.name === "table") {
+                            if (newStateTable2.pos === pos) {
+                              if (node.attrs.columnSize !== newColumnSize.join(",")) {
+                                tr2 = tr2.setNodeMarkup(pos, void 0, Object.assign(Object.assign({}, node.attrs), { columnSize: newColumnSize.join(",") }));
+                                isThereUpdate = true;
+                              }
+                            }
+                          }
+                        });
+                      } else {
+                      }
+                    }
+                  });
+                }
+              }
+            });
+            return isThereUpdate ? tr2 : null;
+          }
+        })
+      ];
     }
   });
 
@@ -22268,6 +22909,41 @@ img.ProseMirror-separator {
     }
   });
 
+  // node_modules/tiptap-table-plus/dist/pagination/TableCellPlus.js
+  var TableCellPlus = TableCell.extend({
+    addNodeView() {
+      return ({ node }) => {
+        const tableNode = this.editor.extensionManager.extensions.find((extension) => extension.name === "table");
+        const borderColor = tableNode ? tableNode.options.borderColor : "black";
+        const dom = document.createElement("td");
+        dom.style.border = `1px solid ${borderColor}`;
+        let colspan = node.attrs.colspan;
+        let rowspan = node.attrs.rowspan;
+        const updateGrid = (colspan2, rowspan2) => {
+          dom.style.gridColumn = `auto / span ${colspan2 || 1}`;
+          dom.rowSpan = rowspan2 || 1;
+          dom.setAttribute("colspan", `${colspan2 || 1}`);
+        };
+        updateGrid(colspan, rowspan);
+        return {
+          dom,
+          contentDOM: dom,
+          update(updatedNode) {
+            if (updatedNode.type.name !== "tableCell") {
+              return false;
+            }
+            const updatedColspan = updatedNode.attrs.colspan;
+            if (updatedColspan !== colspan) {
+              colspan = updatedColspan;
+              updateGrid(updatedColspan, rowspan);
+            }
+            return true;
+          }
+        };
+      };
+    }
+  });
+
   // node_modules/@tiptap/extension-table-header/dist/index.js
   var TableHeader = Node3.create({
     name: "tableHeader",
@@ -22306,6 +22982,97 @@ img.ProseMirror-separator {
       return ["th", mergeAttributes(this.options.HTMLAttributes, HTMLAttributes), 0];
     }
   });
+
+  // node_modules/tiptap-table-plus/dist/pagination/TableHeaderPlus.js
+  var TableHeaderPlus = TableHeader.extend({
+    addNodeView() {
+      return ({ node }) => {
+        const tableNode = this.editor.extensionManager.extensions.find((extension) => extension.name === "table");
+        const borderColor = tableNode ? tableNode.options.borderColor : "black";
+        const dom = document.createElement("th");
+        dom.style.border = `1px solid ${borderColor}`;
+        let colspan = node.attrs.colspan;
+        let rowspan = node.attrs.rowspan;
+        const updateGrid = (colspan2, rowspan2) => {
+          dom.style.gridColumn = `auto / span ${colspan2 || 1}`;
+          dom.rowSpan = rowspan2 || 1;
+          dom.setAttribute("colspan", `${colspan2 || 1}`);
+        };
+        updateGrid(colspan, rowspan);
+        return {
+          dom,
+          contentDOM: dom,
+          update(updatedNode) {
+            if (updatedNode.type.name !== "tableHeader") {
+              return false;
+            }
+            const updatedColspan = updatedNode.attrs.colspan;
+            if (updatedColspan !== colspan) {
+              colspan = updatedColspan;
+              updateGrid(updatedColspan, rowspan);
+            }
+            return true;
+          }
+        };
+      };
+    }
+  });
+
+  // node_modules/@tiptap/extension-table-row/dist/index.js
+  var TableRow = Node3.create({
+    name: "tableRow",
+    addOptions() {
+      return {
+        HTMLAttributes: {}
+      };
+    },
+    content: "(tableCell | tableHeader)*",
+    tableRole: "row",
+    parseHTML() {
+      return [
+        { tag: "tr" }
+      ];
+    },
+    renderHTML({ HTMLAttributes }) {
+      return ["tr", mergeAttributes(this.options.HTMLAttributes, HTMLAttributes), 0];
+    }
+  });
+
+  // node_modules/tiptap-table-plus/dist/pagination/TableRowPlus.js
+  var TableRowPlus = TableRow.extend({
+    addNodeView() {
+      return ({}) => {
+        const dom = document.createElement("tr");
+        dom.style.display = "grid";
+        dom.style.gridTemplateColumns = `var(--cell-percentage)`;
+        dom.style.position = "relative";
+        return {
+          dom,
+          contentDOM: dom
+        };
+      };
+    }
+  });
+
+  // node_modules/tiptap-table-plus/dist/pagination/index.js
+  var PaginationTable = {
+    TablePlus,
+    TableCellPlus,
+    TableHeaderPlus,
+    TableRowPlus
+  };
+
+  // node_modules/tiptap-table-plus/dist/TablePlus.js
+  var TablePlus2 = Table.extend({
+    addExtensions() {
+      return [
+        TableCommandExtension_default
+      ];
+    }
+  });
+
+  // node_modules/tiptap-table-plus/dist/index.js
+  var { TablePlus: TablePlus3, TableCellPlus: TableCellPlus2, TableHeaderPlus: TableHeaderPlus2, TableRowPlus: TableRowPlus2 } = PaginationTable;
 
   // node_modules/markdown-it/lib/common/utils.mjs
   var utils_exports = {};
@@ -29573,8 +30340,18 @@ ${element.innerHTML}
         header.innerHTML = `
         <span class="content-group-icon">\u{1F4C1}</span>
         <span class="content-group-title">${escapeHtml2(initialTitle)}</span>
+        <span class="content-group-unpack" title="Unpack group">\u2935</span>
         <span class="content-group-chevron">\u203A</span>
       `;
+        const unpackBtn = header.querySelector(".content-group-unpack");
+        unpackBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const pos = typeof getPos === "function" ? getPos() : null;
+          if (pos !== null) {
+            editor.commands.unpackGroup(pos);
+          }
+        });
         header.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -29633,6 +30410,17 @@ ${element.innerHTML}
             }
           });
           return found2;
+        },
+        unpackGroup: (pos) => ({ tr: tr2, state, dispatch }) => {
+          const node = state.doc.nodeAt(pos);
+          if (!node || node.type.name !== "contentGroup") {
+            return false;
+          }
+          if (dispatch) {
+            const content = node.content;
+            tr2.replaceWith(pos, pos + node.nodeSize, content);
+          }
+          return true;
         }
       };
     }
@@ -29714,10 +30502,12 @@ ${element.innerHTML}
   var tableMenuCommands = [
     { type: "addRowBefore", title: "Insert Row Above", icon: "\u2191", section: "row" },
     { type: "addRowAfter", title: "Insert Row Below", icon: "\u2193", section: "row" },
+    { type: "duplicateRow", title: "Duplicate Row", icon: "\u2913", section: "row" },
     { type: "deleteRow", title: "Delete Row", icon: "\u2212", section: "row" },
     { type: "divider1", section: "divider" },
     { type: "addColumnBefore", title: "Insert Column Left", icon: "\u2190", section: "column" },
     { type: "addColumnAfter", title: "Insert Column Right", icon: "\u2192", section: "column" },
+    { type: "duplicateColumn", title: "Duplicate Column", icon: "\u2912", section: "column" },
     { type: "deleteColumn", title: "Delete Column", icon: "\u2212", section: "column" },
     { type: "divider2", section: "divider" },
     { type: "toggleHeaderRow", title: "Toggle Header Row", icon: "H", section: "header" },
@@ -29784,6 +30574,9 @@ ${element.innerHTML}
       case "addRowAfter":
         editor.chain().focus().addRowAfter().run();
         break;
+      case "duplicateRow":
+        editor.chain().focus().duplicateRow().run();
+        break;
       case "deleteRow":
         editor.chain().focus().deleteRow().run();
         break;
@@ -29792,6 +30585,9 @@ ${element.innerHTML}
         break;
       case "addColumnAfter":
         editor.chain().focus().addColumnAfter().run();
+        break;
+      case "duplicateColumn":
+        editor.chain().focus().duplicateColumn().run();
         break;
       case "deleteColumn":
         editor.chain().focus().deleteColumn().run();
@@ -30047,6 +30843,35 @@ ${element.innerHTML}
           return true;
         }
       };
+    }
+  });
+  var FILE_PATH_PREFIX = "x-file-path:";
+  var FilePathLink = Extension.create({
+    name: "filePathLink",
+    addProseMirrorPlugins() {
+      return [
+        new Plugin({
+          key: new PluginKey("filePathLink"),
+          props: {
+            // Handle paste events to detect file paths
+            handlePaste(view, event, slice2) {
+              const text2 = event.clipboardData?.getData("text/plain");
+              if (!text2) return false;
+              const filePathRegex = /^(\/|~\/)[^\s<>"'|*?]+$/;
+              if (!filePathRegex.test(text2.trim())) return false;
+              const filePath = text2.trim();
+              const fileUrl = FILE_PATH_PREFIX + filePath;
+              const { state, dispatch } = view;
+              const { schema: schema2, selection } = state;
+              const linkMark = schema2.marks.link.create({ href: fileUrl });
+              const textNode = schema2.text(filePath, [linkMark]);
+              const tr2 = state.tr.replaceSelectionWith(textNode, false);
+              dispatch(tr2);
+              return true;
+            }
+          }
+        })
+      ];
     }
   });
   var TodoInputRule = Extension.create({
@@ -30316,22 +31141,23 @@ ${inner}
           transformCopiedText: true,
           transformPastedText: true
         }),
-        Table.configure({
+        TablePlus3.configure({
           resizable: true,
           HTMLAttributes: {
             class: "tiptap-table"
           }
         }),
-        TableRow,
-        TableHeader,
-        TableCell,
+        TableRowPlus2,
+        TableHeaderPlus2,
+        TableCellPlus2,
         TableMarkdownFix,
         SlashCommands,
         TodoInputRule,
         TableContextMenu,
         TabIndentation,
         GroupNode,
-        GroupSelectionExtension
+        GroupSelectionExtension,
+        FilePathLink
       ],
       autofocus: true,
       editorProps: {
@@ -30426,14 +31252,29 @@ ${inner}
     }
     document.getElementById("editor").addEventListener("click", (e) => {
       const link2 = e.target.closest("a");
-      if (link2 && link2.href) {
+      if (link2) {
         e.preventDefault();
         e.stopPropagation();
-        try {
-          webkit.messageHandlers.openLink.postMessage(link2.href);
-        } catch (err) {
-          window.open(link2.href, "_blank");
+        const href = link2.getAttribute("href");
+        if (!href) return;
+        if (href.startsWith("x-file-path:")) {
+          const filePath = href.substring("x-file-path:".length);
+          try {
+            webkit.messageHandlers.openFilePath.postMessage(filePath);
+          } catch (err) {
+            console.log("openFilePath:", filePath);
+          }
+        } else {
+          try {
+            webkit.messageHandlers.openLink.postMessage(href);
+          } catch (err) {
+            window.open(href, "_blank");
+          }
         }
+        return;
+      }
+      const selection = window.getSelection();
+      if (selection && selection.toString().length > 0) {
         return;
       }
       const editorEl = document.getElementById("editor");
@@ -30443,6 +31284,10 @@ ${inner}
       }
     });
     document.getElementById("editor").addEventListener("click", (e) => {
+      const selection = window.getSelection();
+      if (selection && selection.toString().length > 0) {
+        return;
+      }
       const editorEl = document.getElementById("editor");
       const contentEl = editorEl.querySelector(".tiptap-content");
       if (!contentEl) return;
@@ -30455,7 +31300,24 @@ ${inner}
         appendParagraphAtEnd();
       }
     }, true);
+    let mouseDownPos = null;
     document.getElementById("editor").addEventListener("mousedown", (e) => {
+      mouseDownPos = { x: e.clientX, y: e.clientY };
+    }, true);
+    document.getElementById("editor").addEventListener("mouseup", (e) => {
+      if (mouseDownPos) {
+        const dx = Math.abs(e.clientX - mouseDownPos.x);
+        const dy = Math.abs(e.clientY - mouseDownPos.y);
+        if (dx > 5 || dy > 5) {
+          mouseDownPos = null;
+          return;
+        }
+      }
+      mouseDownPos = null;
+      const selection = window.getSelection();
+      if (selection && selection.toString().length > 0) {
+        return;
+      }
       const editorEl = document.getElementById("editor");
       const contentEl = editorEl.querySelector(".tiptap-content");
       if (!contentEl) return;
@@ -30465,8 +31327,6 @@ ${inner}
       const editorRect = editorEl.getBoundingClientRect();
       const clickY = e.clientY;
       if (clickY > lastElementRect.bottom + 5 && clickY < editorRect.bottom) {
-        e.preventDefault();
-        e.stopPropagation();
         appendParagraphAtEnd();
       }
     }, true);

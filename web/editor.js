@@ -4,10 +4,7 @@ import Link from '@tiptap/extension-link'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import Placeholder from '@tiptap/extension-placeholder'
-import Table from '@tiptap/extension-table'
-import TableRow from '@tiptap/extension-table-row'
-import TableCell from '@tiptap/extension-table-cell'
-import TableHeader from '@tiptap/extension-table-header'
+import { TablePlus, TableRowPlus, TableCellPlus, TableHeaderPlus } from 'tiptap-table-plus'
 import { Markdown } from 'tiptap-markdown'
 import { Extension, Node, mergeAttributes } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
@@ -109,8 +106,20 @@ const GroupNode = Node.create({
       header.innerHTML = `
         <span class="content-group-icon">📁</span>
         <span class="content-group-title">${escapeHtml(initialTitle)}</span>
+        <span class="content-group-unpack" title="Unpack group">⤵</span>
         <span class="content-group-chevron">›</span>
       `
+
+      // Handle click on unpack button to dissolve the group
+      const unpackBtn = header.querySelector('.content-group-unpack')
+      unpackBtn.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        const pos = typeof getPos === 'function' ? getPos() : null
+        if (pos !== null) {
+          editor.commands.unpackGroup(pos)
+        }
+      })
 
       // Handle click on header to navigate into group
       header.addEventListener('click', (e) => {
@@ -180,6 +189,21 @@ const GroupNode = Node.create({
           }
         })
         return found
+      },
+      unpackGroup: (pos) => ({ tr, state, dispatch }) => {
+        // Find the group node at the given position
+        const node = state.doc.nodeAt(pos)
+        if (!node || node.type.name !== 'contentGroup') {
+          return false
+        }
+
+        if (dispatch) {
+          // Get the content inside the group
+          const content = node.content
+          // Replace the group node with its content
+          tr.replaceWith(pos, pos + node.nodeSize, content)
+        }
+        return true
       },
     }
   },
@@ -297,10 +321,12 @@ let tableMenuVisible = false
 const tableMenuCommands = [
   { type: 'addRowBefore', title: 'Insert Row Above', icon: '\u2191', section: 'row' },
   { type: 'addRowAfter', title: 'Insert Row Below', icon: '\u2193', section: 'row' },
+  { type: 'duplicateRow', title: 'Duplicate Row', icon: '\u2913', section: 'row' },
   { type: 'deleteRow', title: 'Delete Row', icon: '\u2212', section: 'row' },
   { type: 'divider1', section: 'divider' },
   { type: 'addColumnBefore', title: 'Insert Column Left', icon: '\u2190', section: 'column' },
   { type: 'addColumnAfter', title: 'Insert Column Right', icon: '\u2192', section: 'column' },
+  { type: 'duplicateColumn', title: 'Duplicate Column', icon: '\u2912', section: 'column' },
   { type: 'deleteColumn', title: 'Delete Column', icon: '\u2212', section: 'column' },
   { type: 'divider2', section: 'divider' },
   { type: 'toggleHeaderRow', title: 'Toggle Header Row', icon: 'H', section: 'header' },
@@ -380,6 +406,9 @@ function executeTableCommand(type) {
     case 'addRowAfter':
       editor.chain().focus().addRowAfter().run()
       break
+    case 'duplicateRow':
+      editor.chain().focus().duplicateRow().run()
+      break
     case 'deleteRow':
       editor.chain().focus().deleteRow().run()
       break
@@ -388,6 +417,9 @@ function executeTableCommand(type) {
       break
     case 'addColumnAfter':
       editor.chain().focus().addColumnAfter().run()
+      break
+    case 'duplicateColumn':
+      editor.chain().focus().duplicateColumn().run()
       break
     case 'deleteColumn':
       editor.chain().focus().deleteColumn().run()
@@ -686,6 +718,49 @@ const TabIndentation = Extension.create({
         return true
       },
     }
+  },
+})
+
+// --- File Path Link Extension ---
+// Detects file paths on paste and converts them to clickable links
+// Uses a special prefix that we intercept in the click handler
+
+const FILE_PATH_PREFIX = 'x-file-path:'
+
+const FilePathLink = Extension.create({
+  name: 'filePathLink',
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('filePathLink'),
+        props: {
+          // Handle paste events to detect file paths
+          handlePaste(view, event, slice) {
+            const text = event.clipboardData?.getData('text/plain')
+            if (!text) return false
+
+            // Check if it looks like a file path
+            // Matches: /path/to/file, ~/path/to/file
+            const filePathRegex = /^(\/|~\/)[^\s<>"'|*?]+$/
+            if (!filePathRegex.test(text.trim())) return false
+
+            const filePath = text.trim()
+            // Use a special prefix - this will be a malformed URL that the browser won't navigate to
+            const fileUrl = FILE_PATH_PREFIX + filePath
+
+            // Insert as a link
+            const { state, dispatch } = view
+            const { schema, selection } = state
+            const linkMark = schema.marks.link.create({ href: fileUrl })
+            const textNode = schema.text(filePath, [linkMark])
+            const tr = state.tr.replaceSelectionWith(textNode, false)
+            dispatch(tr)
+            return true
+          },
+        },
+      }),
+    ]
   },
 })
 
@@ -1021,15 +1096,15 @@ function initEditor() {
         transformCopiedText: true,
         transformPastedText: true,
       }),
-      Table.configure({
+      TablePlus.configure({
         resizable: true,
         HTMLAttributes: {
           class: 'tiptap-table',
         },
       }),
-      TableRow,
-      TableHeader,
-      TableCell,
+      TableRowPlus,
+      TableHeaderPlus,
+      TableCellPlus,
       TableMarkdownFix,
       SlashCommands,
       TodoInputRule,
@@ -1037,6 +1112,7 @@ function initEditor() {
       TabIndentation,
       GroupNode,
       GroupSelectionExtension,
+      FilePathLink,
     ],
     autofocus: true,
     editorProps: {
@@ -1142,19 +1218,40 @@ function initEditor() {
     // Not in WKWebView context
   }
 
-  // Handle link clicks - send to Swift to open in browser
+  // Handle link clicks - send to Swift to open in browser or Finder
   // Also handle click-after-content to append
   document.getElementById('editor').addEventListener('click', (e) => {
     const link = e.target.closest('a')
-    if (link && link.href) {
+    if (link) {
       e.preventDefault()
       e.stopPropagation()
-      try {
-        webkit.messageHandlers.openLink.postMessage(link.href)
-      } catch (err) {
-        // Fallback for non-WKWebView context
-        window.open(link.href, '_blank')
+
+      // Get the href attribute directly to avoid browser URL resolution
+      const href = link.getAttribute('href')
+      if (!href) return
+
+      // Check if it's a file path link
+      if (href.startsWith('x-file-path:')) {
+        const filePath = href.substring('x-file-path:'.length)
+        try {
+          webkit.messageHandlers.openFilePath.postMessage(filePath)
+        } catch (err) {
+          console.log('openFilePath:', filePath)
+        }
+      } else {
+        try {
+          webkit.messageHandlers.openLink.postMessage(href)
+        } catch (err) {
+          // Fallback for non-WKWebView context
+          window.open(href, '_blank')
+        }
       }
+      return
+    }
+
+    // Don't interfere if there's an active text selection
+    const selection = window.getSelection()
+    if (selection && selection.toString().length > 0) {
       return
     }
 
@@ -1170,6 +1267,12 @@ function initEditor() {
 
   // Handle clicks below content to allow easy appending
   document.getElementById('editor').addEventListener('click', (e) => {
+    // Don't interfere if there's an active text selection
+    const selection = window.getSelection()
+    if (selection && selection.toString().length > 0) {
+      return
+    }
+
     const editorEl = document.getElementById('editor')
     const contentEl = editorEl.querySelector('.tiptap-content')
 
@@ -1190,7 +1293,31 @@ function initEditor() {
   }, true) // Use capture phase
 
   // Also handle mousedown for immediate response
+  // Track mousedown position to detect drag selections
+  let mouseDownPos = null
   document.getElementById('editor').addEventListener('mousedown', (e) => {
+    mouseDownPos = { x: e.clientX, y: e.clientY }
+  }, true)
+
+  document.getElementById('editor').addEventListener('mouseup', (e) => {
+    // Check if this was a drag (selection) vs a click
+    if (mouseDownPos) {
+      const dx = Math.abs(e.clientX - mouseDownPos.x)
+      const dy = Math.abs(e.clientY - mouseDownPos.y)
+      // If mouse moved more than 5px, it's a drag/selection, don't interfere
+      if (dx > 5 || dy > 5) {
+        mouseDownPos = null
+        return
+      }
+    }
+    mouseDownPos = null
+
+    // Don't interfere if there's an active text selection
+    const selection = window.getSelection()
+    if (selection && selection.toString().length > 0) {
+      return
+    }
+
     const editorEl = document.getElementById('editor')
     const contentEl = editorEl.querySelector('.tiptap-content')
 
@@ -1206,8 +1333,6 @@ function initEditor() {
 
     // If click is in the padding area below last element
     if (clickY > lastElementRect.bottom + 5 && clickY < editorRect.bottom) {
-      e.preventDefault()
-      e.stopPropagation()
       appendParagraphAtEnd()
     }
   }, true) // Use capture phase

@@ -238,8 +238,13 @@ struct WeekViewMac: View {
 
     @State private var dayRange: ClosedRange<Int> = -30...30
     @State private var hasScrolledToToday = false
+    @State private var isReady = false
 
     private let calendar = Calendar.current
+
+    private var dayOffsets: [Int] {
+        Array(dayRange)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -260,10 +265,27 @@ struct WeekViewMac: View {
             }
             .padding(.horizontal, 4)
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 2) {
-                        ForEach(dayRange.map { $0 }, id: \.self) { offset in
+            if isReady {
+                scrollContent
+            } else {
+                // Placeholder during initial layout
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onAppear {
+                        DispatchQueue.main.async {
+                            isReady = true
+                        }
+                    }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var scrollContent: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(dayOffsets, id: \.self) { offset in
                             let date = calendar.date(byAdding: .day, value: offset, to: startOfToday) ?? Date()
                             let prevDate = calendar.date(byAdding: .day, value: offset - 1, to: startOfToday) ?? Date()
 
@@ -300,11 +322,10 @@ struct WeekViewMac: View {
                         }
                     }
                 }
-                .onChange(of: dailyNoteService.selectedDate) { _, newDate in
-                    let offset = calendar.dateComponents([.day], from: startOfToday, to: newDate).day ?? 0
-                    withAnimation {
-                        proxy.scrollTo(offset, anchor: .center)
-                    }
+            .onChange(of: dailyNoteService.selectedDate) { _, newDate in
+                let offset = calendar.dateComponents([.day], from: startOfToday, to: newDate).day ?? 0
+                withAnimation {
+                    proxy.scrollTo(offset, anchor: .center)
                 }
             }
         }

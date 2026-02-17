@@ -2,7 +2,7 @@ name: ClaudeChat
 options:
   bundleIdPrefix: com.claude
   deploymentTarget:
-    macOS: "14.0"
+    macOS: "26.0"
     iOS: "17.0"
   createIntermediateGroups: true
 
@@ -45,7 +45,7 @@ targets:
       INFOPLIST_FILE: macOS/Info.plist
       PRODUCT_BUNDLE_IDENTIFIER: com.claude.ClaudeChat
       SWIFT_VERSION: "5.9"
-      MACOSX_DEPLOYMENT_TARGET: "14.0"
+      MACOSX_DEPLOYMENT_TARGET: "26.0"
       CODE_SIGN_ENTITLEMENTS: macOS/ClaudeChat.entitlements
       CODE_SIGN_STYLE: Automatic
       CODE_SIGN_IDENTITY: "Apple Development"

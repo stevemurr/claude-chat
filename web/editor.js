@@ -10,6 +10,78 @@ import { Extension, Node, mergeAttributes } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 
+// --- MentionNode Extension ---
+// Custom inline node for @mentions that link to notes and groups
+
+const MentionNode = Node.create({
+  name: 'mention',
+  group: 'inline',
+  inline: true,
+  atom: true,
+  selectable: true,
+
+  addAttributes() {
+    return {
+      type: { default: 'note' },    // 'note' or 'group'
+      id: { default: null },         // dateKey for notes, groupId for groups
+      noteId: { default: null },     // For groups: which note contains it
+      label: { default: '' },        // Display text
+    }
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: 'span.mention',
+        getAttrs: element => ({
+          type: element.getAttribute('data-mention-type') || 'note',
+          id: element.getAttribute('data-mention-id'),
+          noteId: element.getAttribute('data-mention-note-id'),
+          label: element.textContent?.replace(/^@/, '') || '',
+        }),
+      },
+    ]
+  },
+
+  renderHTML({ node }) {
+    return ['span', {
+      class: `mention mention-${node.attrs.type}`,
+      'data-mention-type': node.attrs.type,
+      'data-mention-id': node.attrs.id,
+      'data-mention-note-id': node.attrs.noteId || '',
+    }, `@${node.attrs.label}`]
+  },
+
+  addNodeView() {
+    return ({ node }) => {
+      const dom = document.createElement('span')
+      dom.className = `mention mention-${node.attrs.type}`
+      dom.setAttribute('data-mention-type', node.attrs.type)
+      dom.setAttribute('data-mention-id', node.attrs.id || '')
+      dom.setAttribute('data-mention-note-id', node.attrs.noteId || '')
+      dom.textContent = `@${node.attrs.label}`
+
+      // Handle click to navigate
+      dom.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        try {
+          webkit.messageHandlers.openMention.postMessage({
+            type: node.attrs.type,
+            id: node.attrs.id,
+            noteId: node.attrs.noteId,
+            label: node.attrs.label,
+          })
+        } catch (err) {
+          console.log('openMention:', node.attrs)
+        }
+      })
+
+      return { dom }
+    }
+  },
+})
+
 // --- GroupNode Extension ---
 // Custom node that renders as a clickable card for navigation
 
@@ -668,6 +740,220 @@ const SlashCommands = Extension.create({
   },
 })
 
+// --- Mention Commands Extension ---
+// Handles @mentions for linking to notes and groups
+
+let mentionMenuEl = null
+let mentionMenuVisible = false
+let mentionSelectedIndex = 0
+let mentionQuery = ''
+let mentionRange = null
+let mentionItems = []
+
+function createMentionMenu() {
+  mentionMenuEl = document.createElement('div')
+  mentionMenuEl.className = 'mention-menu'
+  mentionMenuEl.style.display = 'none'
+  document.body.appendChild(mentionMenuEl)
+}
+
+function renderMentionMenu() {
+  if (mentionItems.length === 0) {
+    mentionMenuEl.innerHTML = '<div class="mention-empty">No matches found</div>'
+    return
+  }
+
+  if (mentionSelectedIndex >= mentionItems.length) {
+    mentionSelectedIndex = mentionItems.length - 1
+  }
+
+  mentionMenuEl.innerHTML = mentionItems.map((item, i) =>
+    `<div class="mention-item${i === mentionSelectedIndex ? ' selected' : ''}" data-index="${i}">
+      <span class="mention-item-icon">${item.type === 'group' ? '🔗' : '📄'}</span>
+      <div class="mention-item-content">
+        <span class="mention-item-title">${escapeHtml(item.label)}</span>
+        ${item.preview ? `<span class="mention-item-preview">${escapeHtml(item.preview)}</span>` : ''}
+      </div>
+    </div>`
+  ).join('')
+
+  // Add click handlers
+  mentionMenuEl.querySelectorAll('.mention-item').forEach(el => {
+    el.addEventListener('mousedown', (e) => {
+      e.preventDefault()
+      const idx = parseInt(el.dataset.index)
+      executeMentionCommand(mentionItems[idx])
+    })
+  })
+}
+
+function showMentionMenu(from) {
+  mentionRange = from
+  mentionQuery = ''
+  mentionSelectedIndex = 0
+  mentionMenuVisible = true
+
+  // Position menu near cursor
+  const coords = window._editor.view.coordsAtPos(from)
+  mentionMenuEl.style.left = `${coords.left}px`
+  mentionMenuEl.style.top = `${coords.bottom + 4}px`
+  mentionMenuEl.style.display = 'block'
+
+  // Request items from Swift
+  requestMentionItems('')
+}
+
+function hideMentionMenu() {
+  mentionMenuVisible = false
+  mentionQuery = ''
+  mentionRange = null
+  mentionItems = []
+  if (mentionMenuEl) {
+    mentionMenuEl.style.display = 'none'
+  }
+}
+
+function requestMentionItems(query) {
+  try {
+    webkit.messageHandlers.requestMentionItems.postMessage(query)
+  } catch (err) {
+    // Fallback for development - no items
+    console.log('requestMentionItems:', query)
+    mentionItems = []
+    renderMentionMenu()
+  }
+}
+
+// Called from Swift with the list of mention items
+window.receiveMentionItems = function(items) {
+  mentionItems = items || []
+  // Filter by current query
+  if (mentionQuery) {
+    const q = mentionQuery.toLowerCase()
+    mentionItems = mentionItems.filter(item =>
+      item.label.toLowerCase().includes(q)
+    )
+  }
+  renderMentionMenu()
+}
+
+function executeMentionCommand(item) {
+  const editor = window._editor
+  if (!editor || !mentionRange) return
+
+  // Delete the @ and query text
+  const { state } = editor.view
+  const to = state.selection.from
+  editor.chain().focus().deleteRange({ from: mentionRange - 1, to }).run()
+
+  // Insert the mention node
+  editor.chain().focus().insertContent({
+    type: 'mention',
+    attrs: {
+      type: item.type,
+      id: item.id,
+      noteId: item.noteId || null,
+      label: item.label,
+    },
+  }).run()
+
+  hideMentionMenu()
+}
+
+const MentionCommands = Extension.create({
+  name: 'mentionCommands',
+
+  addKeyboardShortcuts() {
+    return {
+      // Intercept Shift+2 (which produces @)
+      'Shift-2': ({ editor }) => {
+        const { state } = editor
+        const { from } = state.selection
+        // Insert the @ character first
+        editor.chain().focus().insertContent('@').run()
+        // Then show the menu
+        setTimeout(() => showMentionMenu(from + 1), 0)
+        return true
+      },
+    }
+  },
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('mentionCommands'),
+        props: {
+          handleKeyDown(view, event) {
+            // Handle @ key directly
+            if (event.key === '@' || (event.shiftKey && event.key === '2')) {
+              const { state } = view
+              const { from } = state.selection
+              setTimeout(() => showMentionMenu(from + 1), 10)
+              return false // Don't prevent the character from being inserted
+            }
+            if (mentionMenuVisible) {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault()
+                mentionSelectedIndex = (mentionSelectedIndex + 1) % Math.max(1, mentionItems.length)
+                renderMentionMenu()
+                return true
+              }
+              if (event.key === 'ArrowUp') {
+                event.preventDefault()
+                mentionSelectedIndex = (mentionSelectedIndex - 1 + Math.max(1, mentionItems.length)) % Math.max(1, mentionItems.length)
+                renderMentionMenu()
+                return true
+              }
+              if (event.key === 'Enter' || event.key === 'Tab') {
+                event.preventDefault()
+                if (mentionItems[mentionSelectedIndex]) {
+                  executeMentionCommand(mentionItems[mentionSelectedIndex])
+                }
+                return true
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                hideMentionMenu()
+                return true
+              }
+            }
+            return false
+          },
+          handleTextInput(view, from, to, text) {
+            if (text === '@') {
+              // Show menu if @ is typed (anywhere in text)
+              setTimeout(() => showMentionMenu(from + 1), 0)
+            } else if (mentionMenuVisible) {
+              // Update query
+              mentionQuery += text
+              requestMentionItems(mentionQuery)
+            }
+            return false
+          },
+        },
+        // Watch for deletions while mention menu is open
+        appendTransaction(transactions, oldState, newState) {
+          if (mentionMenuVisible) {
+            const { from } = newState.selection
+            if (mentionRange !== null) {
+              const $from = newState.doc.resolve(from)
+              const textBefore = $from.parent.textContent.slice(0, $from.parentOffset)
+              const atPos = textBefore.lastIndexOf('@')
+              if (atPos === -1) {
+                hideMentionMenu()
+              } else {
+                mentionQuery = textBefore.slice(atPos + 1)
+                requestMentionItems(mentionQuery)
+              }
+            }
+          }
+          return null
+        },
+      }),
+    ]
+  },
+})
+
 // --- Tab Indentation Extension ---
 
 const TabIndentation = Extension.create({
@@ -821,6 +1107,18 @@ function serializeInline(content) {
       return text
     }
     if (node.type === 'hardBreak') return '\n'
+    // Handle inline mention nodes
+    if (node.type === 'mention') {
+      const type = node.attrs?.type || 'note'
+      const id = node.attrs?.id || ''
+      const noteId = node.attrs?.noteId || ''
+      const label = node.attrs?.label || ''
+      // Format: @[Label](mention:type:id) or @[Label](mention:type:id:noteId)
+      if (type === 'group' && noteId) {
+        return `@[${label}](mention:${type}:${id}:${noteId})`
+      }
+      return `@[${label}](mention:${type}:${id})`
+    }
     return ''
   }).join('')
 }
@@ -1013,6 +1311,20 @@ const TableMarkdownFix = Extension.create({
   }
 })
 
+// --- Mention Markdown Preprocessor ---
+// Converts @[Label](mention:type:id:noteId) format into parseable HTML spans
+
+function preprocessMentionMarkdown(markdown) {
+  // Pattern: @[Label](mention:type:id) or @[Label](mention:type:id:noteId)
+  const mentionRegex = /@\[([^\]]+)\]\(mention:([^:)]+):([^:)]+)(?::([^)]+))?\)/g
+
+  return markdown.replace(mentionRegex, (match, label, type, id, noteId) => {
+    const escapedLabel = escapeHtml(label)
+    const noteIdAttr = noteId ? ` data-mention-note-id="${noteId}"` : ''
+    return `<span class="mention mention-${type}" data-mention-type="${type}" data-mention-id="${id}"${noteIdAttr}>@${escapedLabel}</span>`
+  })
+}
+
 // --- Group Markdown Preprocessor ---
 // Converts <!-- group:id:title --> ... <!-- /group:id --> comments into parseable HTML
 
@@ -1069,6 +1381,7 @@ const TableContextMenu = Extension.create({
 function initEditor() {
   createSlashMenu()
   createTableMenu()
+  createMentionMenu()
 
   const editor = new Editor({
     element: document.getElementById('editor'),
@@ -1113,6 +1426,8 @@ function initEditor() {
       GroupNode,
       GroupSelectionExtension,
       FilePathLink,
+      MentionNode,
+      MentionCommands,
     ],
     autofocus: true,
     editorProps: {
@@ -1139,8 +1454,9 @@ function initEditor() {
       if (!markdown || markdown.trim() === '') {
         editor.commands.clearContent()
       } else {
-        // Preprocess group comments before parsing
-        const processed = preprocessGroupMarkdown(markdown)
+        // Preprocess mentions and group comments before parsing
+        let processed = preprocessMentionMarkdown(markdown)
+        processed = preprocessGroupMarkdown(processed)
         editor.commands.setContent(processed)
       }
     },
@@ -1368,6 +1684,9 @@ document.addEventListener('click', (e) => {
   }
   if (tableMenuVisible && tableMenuEl && !tableMenuEl.contains(e.target)) {
     hideTableMenu()
+  }
+  if (mentionMenuVisible && mentionMenuEl && !mentionMenuEl.contains(e.target)) {
+    hideMentionMenu()
   }
 })
 

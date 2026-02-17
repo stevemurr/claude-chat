@@ -30271,6 +30271,71 @@ ${element.innerHTML}
   });
 
   // editor.js
+  var MentionNode = Node3.create({
+    name: "mention",
+    group: "inline",
+    inline: true,
+    atom: true,
+    selectable: true,
+    addAttributes() {
+      return {
+        type: { default: "note" },
+        // 'note' or 'group'
+        id: { default: null },
+        // dateKey for notes, groupId for groups
+        noteId: { default: null },
+        // For groups: which note contains it
+        label: { default: "" }
+        // Display text
+      };
+    },
+    parseHTML() {
+      return [
+        {
+          tag: "span.mention",
+          getAttrs: (element) => ({
+            type: element.getAttribute("data-mention-type") || "note",
+            id: element.getAttribute("data-mention-id"),
+            noteId: element.getAttribute("data-mention-note-id"),
+            label: element.textContent?.replace(/^@/, "") || ""
+          })
+        }
+      ];
+    },
+    renderHTML({ node }) {
+      return ["span", {
+        class: `mention mention-${node.attrs.type}`,
+        "data-mention-type": node.attrs.type,
+        "data-mention-id": node.attrs.id,
+        "data-mention-note-id": node.attrs.noteId || ""
+      }, `@${node.attrs.label}`];
+    },
+    addNodeView() {
+      return ({ node }) => {
+        const dom = document.createElement("span");
+        dom.className = `mention mention-${node.attrs.type}`;
+        dom.setAttribute("data-mention-type", node.attrs.type);
+        dom.setAttribute("data-mention-id", node.attrs.id || "");
+        dom.setAttribute("data-mention-note-id", node.attrs.noteId || "");
+        dom.textContent = `@${node.attrs.label}`;
+        dom.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          try {
+            webkit.messageHandlers.openMention.postMessage({
+              type: node.attrs.type,
+              id: node.attrs.id,
+              noteId: node.attrs.noteId,
+              label: node.attrs.label
+            });
+          } catch (err) {
+            console.log("openMention:", node.attrs);
+          }
+        });
+        return { dom };
+      };
+    }
+  });
   var GroupNode = Node3.create({
     name: "contentGroup",
     group: "block",
@@ -30803,6 +30868,185 @@ ${element.innerHTML}
       ];
     }
   });
+  var mentionMenuEl = null;
+  var mentionMenuVisible = false;
+  var mentionSelectedIndex = 0;
+  var mentionQuery = "";
+  var mentionRange = null;
+  var mentionItems = [];
+  function createMentionMenu() {
+    mentionMenuEl = document.createElement("div");
+    mentionMenuEl.className = "mention-menu";
+    mentionMenuEl.style.display = "none";
+    document.body.appendChild(mentionMenuEl);
+  }
+  function renderMentionMenu() {
+    if (mentionItems.length === 0) {
+      mentionMenuEl.innerHTML = '<div class="mention-empty">No matches found</div>';
+      return;
+    }
+    if (mentionSelectedIndex >= mentionItems.length) {
+      mentionSelectedIndex = mentionItems.length - 1;
+    }
+    mentionMenuEl.innerHTML = mentionItems.map(
+      (item, i) => `<div class="mention-item${i === mentionSelectedIndex ? " selected" : ""}" data-index="${i}">
+      <span class="mention-item-icon">${item.type === "group" ? "\u{1F517}" : "\u{1F4C4}"}</span>
+      <div class="mention-item-content">
+        <span class="mention-item-title">${escapeHtml2(item.label)}</span>
+        ${item.preview ? `<span class="mention-item-preview">${escapeHtml2(item.preview)}</span>` : ""}
+      </div>
+    </div>`
+    ).join("");
+    mentionMenuEl.querySelectorAll(".mention-item").forEach((el) => {
+      el.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        const idx = parseInt(el.dataset.index);
+        executeMentionCommand(mentionItems[idx]);
+      });
+    });
+  }
+  function showMentionMenu(from2) {
+    mentionRange = from2;
+    mentionQuery = "";
+    mentionSelectedIndex = 0;
+    mentionMenuVisible = true;
+    const coords = window._editor.view.coordsAtPos(from2);
+    mentionMenuEl.style.left = `${coords.left}px`;
+    mentionMenuEl.style.top = `${coords.bottom + 4}px`;
+    mentionMenuEl.style.display = "block";
+    requestMentionItems("");
+  }
+  function hideMentionMenu() {
+    mentionMenuVisible = false;
+    mentionQuery = "";
+    mentionRange = null;
+    mentionItems = [];
+    if (mentionMenuEl) {
+      mentionMenuEl.style.display = "none";
+    }
+  }
+  function requestMentionItems(query) {
+    try {
+      webkit.messageHandlers.requestMentionItems.postMessage(query);
+    } catch (err) {
+      console.log("requestMentionItems:", query);
+      mentionItems = [];
+      renderMentionMenu();
+    }
+  }
+  window.receiveMentionItems = function(items) {
+    mentionItems = items || [];
+    if (mentionQuery) {
+      const q = mentionQuery.toLowerCase();
+      mentionItems = mentionItems.filter(
+        (item) => item.label.toLowerCase().includes(q)
+      );
+    }
+    renderMentionMenu();
+  };
+  function executeMentionCommand(item) {
+    const editor = window._editor;
+    if (!editor || !mentionRange) return;
+    const { state } = editor.view;
+    const to = state.selection.from;
+    editor.chain().focus().deleteRange({ from: mentionRange - 1, to }).run();
+    editor.chain().focus().insertContent({
+      type: "mention",
+      attrs: {
+        type: item.type,
+        id: item.id,
+        noteId: item.noteId || null,
+        label: item.label
+      }
+    }).run();
+    hideMentionMenu();
+  }
+  var MentionCommands = Extension.create({
+    name: "mentionCommands",
+    addKeyboardShortcuts() {
+      return {
+        // Intercept Shift+2 (which produces @)
+        "Shift-2": ({ editor }) => {
+          const { state } = editor;
+          const { from: from2 } = state.selection;
+          editor.chain().focus().insertContent("@").run();
+          setTimeout(() => showMentionMenu(from2 + 1), 0);
+          return true;
+        }
+      };
+    },
+    addProseMirrorPlugins() {
+      return [
+        new Plugin({
+          key: new PluginKey("mentionCommands"),
+          props: {
+            handleKeyDown(view, event) {
+              if (event.key === "@" || event.shiftKey && event.key === "2") {
+                const { state } = view;
+                const { from: from2 } = state.selection;
+                setTimeout(() => showMentionMenu(from2 + 1), 10);
+                return false;
+              }
+              if (mentionMenuVisible) {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  mentionSelectedIndex = (mentionSelectedIndex + 1) % Math.max(1, mentionItems.length);
+                  renderMentionMenu();
+                  return true;
+                }
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  mentionSelectedIndex = (mentionSelectedIndex - 1 + Math.max(1, mentionItems.length)) % Math.max(1, mentionItems.length);
+                  renderMentionMenu();
+                  return true;
+                }
+                if (event.key === "Enter" || event.key === "Tab") {
+                  event.preventDefault();
+                  if (mentionItems[mentionSelectedIndex]) {
+                    executeMentionCommand(mentionItems[mentionSelectedIndex]);
+                  }
+                  return true;
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  hideMentionMenu();
+                  return true;
+                }
+              }
+              return false;
+            },
+            handleTextInput(view, from2, to, text2) {
+              if (text2 === "@") {
+                setTimeout(() => showMentionMenu(from2 + 1), 0);
+              } else if (mentionMenuVisible) {
+                mentionQuery += text2;
+                requestMentionItems(mentionQuery);
+              }
+              return false;
+            }
+          },
+          // Watch for deletions while mention menu is open
+          appendTransaction(transactions, oldState, newState) {
+            if (mentionMenuVisible) {
+              const { from: from2 } = newState.selection;
+              if (mentionRange !== null) {
+                const $from = newState.doc.resolve(from2);
+                const textBefore = $from.parent.textContent.slice(0, $from.parentOffset);
+                const atPos = textBefore.lastIndexOf("@");
+                if (atPos === -1) {
+                  hideMentionMenu();
+                } else {
+                  mentionQuery = textBefore.slice(atPos + 1);
+                  requestMentionItems(mentionQuery);
+                }
+              }
+            }
+            return null;
+          }
+        })
+      ];
+    }
+  });
   var TabIndentation = Extension.create({
     name: "tabIndentation",
     addKeyboardShortcuts() {
@@ -30931,6 +31175,16 @@ ${element.innerHTML}
         return text2;
       }
       if (node.type === "hardBreak") return "\n";
+      if (node.type === "mention") {
+        const type = node.attrs?.type || "note";
+        const id = node.attrs?.id || "";
+        const noteId = node.attrs?.noteId || "";
+        const label = node.attrs?.label || "";
+        if (type === "group" && noteId) {
+          return `@[${label}](mention:${type}:${id}:${noteId})`;
+        }
+        return `@[${label}](mention:${type}:${id})`;
+      }
       return "";
     }).join("");
   }
@@ -31076,6 +31330,14 @@ ${inner}
       };
     }
   });
+  function preprocessMentionMarkdown(markdown) {
+    const mentionRegex = /@\[([^\]]+)\]\(mention:([^:)]+):([^:)]+)(?::([^)]+))?\)/g;
+    return markdown.replace(mentionRegex, (match2, label, type, id, noteId) => {
+      const escapedLabel = escapeHtml2(label);
+      const noteIdAttr = noteId ? ` data-mention-note-id="${noteId}"` : "";
+      return `<span class="mention mention-${type}" data-mention-type="${type}" data-mention-id="${id}"${noteIdAttr}>@${escapedLabel}</span>`;
+    });
+  }
   function preprocessGroupMarkdown(markdown) {
     const groupStartRegex = /<!--\s*group:([^:]+):([^>]+?)\s*-->/g;
     const groupEndRegex = /<!--\s*\/group:([^>]+?)\s*-->/g;
@@ -31113,6 +31375,7 @@ ${inner}
   function initEditor() {
     createSlashMenu();
     createTableMenu();
+    createMentionMenu();
     const editor = new Editor({
       element: document.getElementById("editor"),
       extensions: [
@@ -31157,7 +31420,9 @@ ${inner}
         TabIndentation,
         GroupNode,
         GroupSelectionExtension,
-        FilePathLink
+        FilePathLink,
+        MentionNode,
+        MentionCommands
       ],
       autofocus: true,
       editorProps: {
@@ -31180,7 +31445,8 @@ ${inner}
         if (!markdown || markdown.trim() === "") {
           editor.commands.clearContent();
         } else {
-          const processed = preprocessGroupMarkdown(markdown);
+          let processed = preprocessMentionMarkdown(markdown);
+          processed = preprocessGroupMarkdown(processed);
           editor.commands.setContent(processed);
         }
       },
@@ -31348,6 +31614,9 @@ ${inner}
     }
     if (tableMenuVisible && tableMenuEl && !tableMenuEl.contains(e.target)) {
       hideTableMenu();
+    }
+    if (mentionMenuVisible && mentionMenuEl && !mentionMenuEl.contains(e.target)) {
+      hideMentionMenu();
     }
   });
   document.addEventListener("keydown", (e) => {

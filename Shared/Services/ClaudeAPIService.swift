@@ -37,6 +37,14 @@ struct OpenAIRequestMessage: Encodable {
     let content: String
 }
 
+struct OpenAIModelsResponse: Decodable {
+    let data: [OpenAIModel]
+}
+
+struct OpenAIModel: Decodable {
+    let id: String
+}
+
 @MainActor
 class ClaudeAPIService: ObservableObject, ClaudeServiceProtocol {
     @Published var isLoading = false
@@ -103,8 +111,14 @@ class ClaudeAPIService: ObservableObject, ClaudeServiceProtocol {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+        let apiKey = SettingsManager.shared.apiKey
+        if !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+
+        let selectedModel = SettingsManager.shared.selectedModel
         let requestBody = OpenAIChatRequest(
-            model: "claude-cli",
+            model: selectedModel.isEmpty ? "claude-cli" : selectedModel,
             messages: [OpenAIRequestMessage(role: "user", content: message)],
             stream: true
         )

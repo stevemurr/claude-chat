@@ -16,11 +16,21 @@ class SettingsManager: ObservableObject {
         }
     }
 
+    @Published var apiKey: String {
+        didSet { UserDefaults.standard.set(apiKey, forKey: apiKeyKey) }
+    }
+
+    @Published var selectedModel: String {
+        didSet { UserDefaults.standard.set(selectedModel, forKey: selectedModelKey) }
+    }
+
     /// Always true on iOS - we can only use API, not CLI
     var useAPIService: Bool { true }
 
     private let apiEndpointKey = "api_endpoint"
     private let syncServerURLKey = "syncServerURL"
+    private let apiKeyKey = "api_key"
+    private let selectedModelKey = "selected_model"
 
     private let currentTailnetHost = "macbook-pro-8.tail11899.ts.net"
 
@@ -37,6 +47,9 @@ class SettingsManager: ObservableObject {
         } else {
             self.syncServerURL = "http://\(currentTailnetHost):8081"
         }
+
+        self.apiKey = UserDefaults.standard.string(forKey: apiKeyKey) ?? ""
+        self.selectedModel = UserDefaults.standard.string(forKey: selectedModelKey) ?? ""
 
         // Migrate old URLs to tailnet
         migrateOldURLs()

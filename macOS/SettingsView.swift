@@ -76,11 +76,21 @@ class SettingsManager: ObservableObject {
         }
     }
 
+    @Published var apiKey: String {
+        didSet { UserDefaults.standard.set(apiKey, forKey: apiKeyKey) }
+    }
+
+    @Published var selectedModel: String {
+        didSet { UserDefaults.standard.set(selectedModel, forKey: selectedModelKey) }
+    }
+
     private let hotkeyKey = "hotkey_config"
     private let claudePathKey = "claude_path"
     private let apiEndpointKey = "api_endpoint"
     private let useAPIServiceKey = "use_api_service"
     private let syncServerURLKey = "syncServerURL"
+    private let apiKeyKey = "api_key"
+    private let selectedModelKey = "selected_model"
 
     // Common locations where claude CLI might be installed
     static let defaultClaudePaths = [
@@ -121,6 +131,9 @@ class SettingsManager: ObservableObject {
         } else {
             self.syncServerURL = "http://macbook-pro-8.tail11899.ts.net:8081"
         }
+
+        self.apiKey = UserDefaults.standard.string(forKey: apiKeyKey) ?? ""
+        self.selectedModel = UserDefaults.standard.string(forKey: selectedModelKey) ?? ""
 
         // Migrate old URLs to tailnet
         migrateOldURLs()
@@ -220,6 +233,9 @@ extension Notification.Name {
 struct SettingsView: View {
     @ObservedObject var settings = SettingsManager.shared
     @State private var isRecording = false
+    @State private var availableModels: [String] = []
+    @State private var isFetchingModels = false
+    @State private var modelFetchError: String?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -334,7 +350,7 @@ struct SettingsView: View {
                 }
             }
 
-            // API Endpoint (only shown when using API)
+            // API Settings (only shown when using API)
             if settings.useAPIService {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("API Endpoint")
@@ -344,10 +360,76 @@ struct SettingsView: View {
                     TextField("http://macbook-pro-8.tail11899.ts.net:8080", text: $settings.apiEndpoint)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 12, design: .monospaced))
+                        .onChange(of: settings.apiEndpoint) { _ in
+                            availableModels = []
+                            modelFetchError = nil
+                        }
 
-                    Text("OpenAI-compatible endpoint (e.g., Tailscale node)")
+                    Text("OpenAI-compatible endpoint (e.g., LiteLLM, Ollama)")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("API Key")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.secondary)
+
+                    SecureField("Optional", text: $settings.apiKey)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
+                        .onChange(of: settings.apiKey) { _ in
+                            availableModels = []
+                            modelFetchError = nil
+                        }
+
+                    Text("Bearer token for authenticated endpoints")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Model")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.secondary)
+
+                    HStack {
+                        if !availableModels.isEmpty {
+                            Picker("", selection: $settings.selectedModel) {
+                                ForEach(availableModels, id: \.self) { model in
+                                    Text(model).tag(model)
+                                }
+                            }
+                            .labelsHidden()
+                        } else {
+                            TextField("claude-cli", text: $settings.selectedModel)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 12, design: .monospaced))
+                        }
+
+                        Button(action: { fetchModels() }) {
+                            if isFetchingModels {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 12))
+                        .disabled(isFetchingModels)
+                    }
+
+                    if let error = modelFetchError {
+                        Text(error)
+                            .font(.system(size: 11))
+                            .foregroundColor(.red)
+                    } else {
+                        Text("Select a model or click refresh to fetch from server")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
 
@@ -371,8 +453,71 @@ struct SettingsView: View {
         .padding(.horizontal, 20)
         .padding(.top, 24)
         .padding(.bottom, 20)
-        .frame(width: 450, height: 440)
+        .frame(width: 450, height: settings.useAPIService ? 560 : 440)
         .background(Color(NSColor.textBackgroundColor))
+    }
+
+    private func fetchModels() {
+        isFetchingModels = true
+        modelFetchError = nil
+
+        let urlString = settings.apiEndpoint.hasSuffix("/")
+            ? "\(settings.apiEndpoint)v1/models"
+            : "\(settings.apiEndpoint)/v1/models"
+
+        guard let url = URL(string: urlString) else {
+            modelFetchError = "Invalid endpoint URL"
+            isFetchingModels = false
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        if !settings.apiKey.isEmpty {
+            request.setValue("Bearer \(settings.apiKey)", forHTTPHeaderField: "Authorization")
+        }
+
+        Task {
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    await MainActor.run {
+                        modelFetchError = "Invalid response"
+                        isFetchingModels = false
+                    }
+                    return
+                }
+
+                guard httpResponse.statusCode == 200 else {
+                    await MainActor.run {
+                        if httpResponse.statusCode == 401 {
+                            modelFetchError = "Authentication required — check your API key"
+                        } else {
+                            modelFetchError = "Server returned HTTP \(httpResponse.statusCode)"
+                        }
+                        isFetchingModels = false
+                    }
+                    return
+                }
+
+                let modelsResponse = try JSONDecoder().decode(OpenAIModelsResponse.self, from: data)
+                let models = modelsResponse.data.map(\.id).sorted()
+
+                await MainActor.run {
+                    availableModels = models
+                    if !models.contains(settings.selectedModel) {
+                        settings.selectedModel = models.first ?? ""
+                    }
+                    isFetchingModels = false
+                }
+            } catch {
+                await MainActor.run {
+                    modelFetchError = "Failed to fetch models: \(error.localizedDescription)"
+                    isFetchingModels = false
+                }
+            }
+        }
     }
 }
 

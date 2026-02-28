@@ -41,7 +41,7 @@ class ClaudeService: ObservableObject, ClaudeServiceProtocol {
         let fullMessage: String
         if let context = noteContext, !context.isEmpty {
             fullMessage = """
-            [The user has attached the following notes for reference. You can update these notes by including <note-update date="YYYY-MM-DD">new content</note-update> in your response, where YYYY-MM-DD matches the date shown in parentheses.]
+            [The user has attached the following notes for reference. ONLY update notes if the user explicitly asks you to modify, update, or change a note. To update a note, include <note-update date="YYYY-MM-DD">new content</note-update> in your response, where YYYY-MM-DD matches the date shown in parentheses. Do NOT proactively update notes unless the user requests it.]
 
             \(context)
 

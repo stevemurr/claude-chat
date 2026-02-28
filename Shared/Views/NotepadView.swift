@@ -79,6 +79,9 @@ struct NotepadContentView: View {
             TiptapEditorView(viewModel: viewModel)
                 .background(Color.platformTextBackground)
         }
+        .onDisappear {
+            viewModel.cleanup()
+        }
         .onChange(of: dailyNoteService.currentNote.dateKey) { _, _ in
             // Clear navigation stack when switching notes
             viewModel.groupNavigation.clear()

@@ -9,7 +9,6 @@ struct NoteUpdateParser {
     /// Parse note updates from Claude's response
     /// Returns extracted updates AND cleaned text (with tags removed) for display
     static func parse(_ text: String) -> (updates: [NoteUpdate], cleanedText: String) {
-        print("[NoteUpdateParser] Parsing text (\(text.count) chars): \(text.prefix(500))...")
         // Pattern: <note-update date="YYYY-MM-DD">content</note-update>
         // Using [\s\S]*? for content to match across newlines (non-greedy)
         let pattern = #"<note-update\s+date="(\d{4}-\d{2}-\d{2})">([\s\S]*?)</note-update>"#
@@ -34,11 +33,6 @@ struct NoteUpdateParser {
             let content = String(text[contentRange]).trimmingCharacters(in: .whitespacesAndNewlines)
 
             updates.append(NoteUpdate(dateKey: dateKey, content: content))
-        }
-
-        print("[NoteUpdateParser] Found \(updates.count) updates")
-        for update in updates {
-            print("[NoteUpdateParser] Update for \(update.dateKey): \(update.content.prefix(100))...")
         }
 
         // Remove the note-update tags from the display text

@@ -31,14 +31,11 @@ targets:
     info:
       path: macOS/Info.plist
       properties:
-        LSUIElement: true
+        LSUIElement: false
         CFBundleDisplayName: ClaudeChat
         NSAppleEventsUsageDescription: ClaudeChat needs to send Apple Events.
         NSAppTransportSecurity:
-          NSExceptionDomains:
-            tail11899.ts.net:
-              NSIncludesSubdomains: true
-              NSExceptionAllowsInsecureHTTPLoads: true
+          NSAllowsArbitraryLoads: true
     entitlements:
       path: macOS/ClaudeChat.entitlements
     settings:
@@ -76,10 +73,7 @@ targets:
         CFBundleDisplayName: ClaudeChat
         UILaunchScreen: {}
         NSAppTransportSecurity:
-          NSExceptionDomains:
-            tail11899.ts.net:
-              NSIncludesSubdomains: true
-              NSExceptionAllowsInsecureHTTPLoads: true
+          NSAllowsArbitraryLoads: true
     entitlements:
       path: iOS/ClaudeChat-iOS.entitlements
     settings:

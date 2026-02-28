@@ -127,7 +127,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         self.window = window
 
         // Configure window behavior
-        window.level = .floating
+        window.level = .normal
         window.styleMask = [.titled, .closable, .resizable, .fullSizeContentView]
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
@@ -164,9 +164,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             &eventHandlerRef
         )
 
-        if status != noErr {
-            print("Failed to install event handler: \(status)")
-        }
 
         // Convert NSEvent modifier flags to Carbon modifiers
         var carbonModifiers: UInt32 = 0
@@ -196,9 +193,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             &hotkeyRef
         )
 
-        if registerStatus != noErr {
-            print("Failed to register hotkey: \(registerStatus)")
-        }
 
         // Local monitor for escape and other keys when app is focused
         localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -236,7 +230,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Escape to hide when visible (but not when command palette is open)
         if event.keyCode == 53 && window?.isVisible == true { // 53 = Escape
-            if CommandPaletteState.isVisible {
+            if CommandPaletteService.isVisibleStatic {
                 return false // Let the palette handle Escape
             }
             hideWindow()

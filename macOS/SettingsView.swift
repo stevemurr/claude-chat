@@ -42,7 +42,7 @@ struct HotkeyConfig: Codable, Equatable {
     }
 }
 
-class SettingsManager: ObservableObject {
+class SettingsManager: SharedSettingsManager {
     static let shared = SettingsManager()
 
     @Published var hotkey: HotkeyConfig {
@@ -54,43 +54,9 @@ class SettingsManager: ObservableObject {
 
     @Published var claudePath: String {
         didSet {
-            UserDefaults.standard.set(claudePath, forKey: claudePathKey)
+            UserDefaults.standard.set(claudePath, forKey: SettingsKeys.claudePath)
         }
     }
-
-    @Published var apiEndpoint: String {
-        didSet {
-            UserDefaults.standard.set(apiEndpoint, forKey: apiEndpointKey)
-        }
-    }
-
-    @Published var useAPIService: Bool {
-        didSet {
-            UserDefaults.standard.set(useAPIService, forKey: useAPIServiceKey)
-        }
-    }
-
-    @Published var syncServerURL: String {
-        didSet {
-            UserDefaults.standard.set(syncServerURL, forKey: syncServerURLKey)
-        }
-    }
-
-    @Published var apiKey: String {
-        didSet { UserDefaults.standard.set(apiKey, forKey: apiKeyKey) }
-    }
-
-    @Published var selectedModel: String {
-        didSet { UserDefaults.standard.set(selectedModel, forKey: selectedModelKey) }
-    }
-
-    private let hotkeyKey = "hotkey_config"
-    private let claudePathKey = "claude_path"
-    private let apiEndpointKey = "api_endpoint"
-    private let useAPIServiceKey = "use_api_service"
-    private let syncServerURLKey = "syncServerURL"
-    private let apiKeyKey = "api_key"
-    private let selectedModelKey = "selected_model"
 
     // Common locations where claude CLI might be installed
     static let defaultClaudePaths = [
@@ -101,8 +67,8 @@ class SettingsManager: ObservableObject {
         "/usr/bin/claude"
     ]
 
-    init() {
-        if let data = UserDefaults.standard.data(forKey: hotkeyKey),
+    override init() {
+        if let data = UserDefaults.standard.data(forKey: SettingsKeys.hotkeyConfig),
            let config = try? JSONDecoder().decode(HotkeyConfig.self, from: data) {
             self.hotkey = config
         } else {
@@ -110,68 +76,18 @@ class SettingsManager: ObservableObject {
         }
 
         // Load saved path or auto-detect
-        if let savedPath = UserDefaults.standard.string(forKey: claudePathKey), !savedPath.isEmpty {
+        if let savedPath = UserDefaults.standard.string(forKey: SettingsKeys.claudePath), !savedPath.isEmpty {
             self.claudePath = savedPath
         } else {
             self.claudePath = SettingsManager.detectClaudePath() ?? ""
         }
 
-        // Load API settings
-        if let savedEndpoint = UserDefaults.standard.string(forKey: apiEndpointKey), !savedEndpoint.isEmpty {
-            self.apiEndpoint = savedEndpoint
-        } else {
-            self.apiEndpoint = "http://macbook-pro-8.tail11899.ts.net:8080"
-        }
-
-        self.useAPIService = UserDefaults.standard.bool(forKey: useAPIServiceKey)
-
-        // Load sync server URL
-        if let savedSyncURL = UserDefaults.standard.string(forKey: syncServerURLKey), !savedSyncURL.isEmpty {
-            self.syncServerURL = savedSyncURL
-        } else {
-            self.syncServerURL = "http://macbook-pro-8.tail11899.ts.net:8081"
-        }
-
-        self.apiKey = UserDefaults.standard.string(forKey: apiKeyKey) ?? ""
-        self.selectedModel = UserDefaults.standard.string(forKey: selectedModelKey) ?? ""
-
-        // Migrate old URLs to tailnet
-        migrateOldURLs()
-
-        // didSet doesn't fire during init, so always ensure defaults are saved
-        // This handles fresh installs where no migration occurs
-        UserDefaults.standard.set(apiEndpoint, forKey: apiEndpointKey)
-        UserDefaults.standard.set(syncServerURL, forKey: syncServerURLKey)
-    }
-
-    private static let currentTailnetHost = "macbook-pro-8.tail11899.ts.net"
-
-    private func migrateOldURLs() {
-        let oldPatterns = ["192.168.1.231", "localhost", "127.0.0.1"]
-        var didMigrate = false
-
-        for pattern in oldPatterns {
-            if apiEndpoint.contains(pattern) {
-                apiEndpoint = apiEndpoint.replacingOccurrences(of: pattern, with: Self.currentTailnetHost)
-                didMigrate = true
-            }
-            if syncServerURL.contains(pattern) {
-                syncServerURL = syncServerURL.replacingOccurrences(of: pattern, with: Self.currentTailnetHost)
-                didMigrate = true
-            }
-        }
-
-        // didSet doesn't fire during init, so save manually
-        if didMigrate {
-            UserDefaults.standard.set(apiEndpoint, forKey: apiEndpointKey)
-            UserDefaults.standard.set(syncServerURL, forKey: syncServerURLKey)
-            print("[SettingsManager] Migrated URLs to tailnet: \(Self.currentTailnetHost)")
-        }
+        super.init()
     }
 
     private func saveHotkey() {
         if let data = try? JSONEncoder().encode(hotkey) {
-            UserDefaults.standard.set(data, forKey: hotkeyKey)
+            UserDefaults.standard.set(data, forKey: SettingsKeys.hotkeyConfig)
         }
     }
 
@@ -194,13 +110,7 @@ class SettingsManager: ObservableObject {
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
 
-        // Set up PATH
-        var env = ProcessInfo.processInfo.environment
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
-        if let path = env["PATH"] {
-            env["PATH"] = "\(homeDir)/.local/bin:/usr/local/bin:/opt/homebrew/bin:" + path
-        }
-        process.environment = env
+        process.environment = ProcessEnvironment.environmentWithCLIPaths()
 
         do {
             try process.run()
@@ -239,7 +149,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 0) {
             // Header
             HStack {
                 Text("Settings")
@@ -252,9 +162,14 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 24)
+            .padding(.bottom, 12)
 
             Divider()
 
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Global Hotkey")
                     .font(.system(size: 12, weight: .semibold))
@@ -357,7 +272,7 @@ struct SettingsView: View {
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.secondary)
 
-                    TextField("http://macbook-pro-8.tail11899.ts.net:8080", text: $settings.apiEndpoint)
+                    TextField("http://your-server:8080", text: $settings.apiEndpoint)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 12, design: .monospaced))
                         .onChange(of: settings.apiEndpoint) { _ in
@@ -439,7 +354,7 @@ struct SettingsView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.secondary)
 
-                TextField("http://macbook-pro-8.tail11899.ts.net:8081", text: $settings.syncServerURL)
+                TextField("http://your-server:8081", text: $settings.syncServerURL)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 12, design: .monospaced))
 
@@ -448,12 +363,12 @@ struct SettingsView: View {
                     .foregroundColor(.secondary)
             }
 
-            Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+            }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 24)
-        .padding(.bottom, 20)
-        .frame(width: 450, height: settings.useAPIService ? 560 : 440)
+        .frame(width: 450, height: 500)
         .background(Color(NSColor.textBackgroundColor))
     }
 

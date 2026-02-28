@@ -1,6 +1,30 @@
 import SwiftUI
 import WebKit
 
+// MARK: - macOS Platform Actions
+
+class MacOSTiptapPlatformActions: TiptapPlatformActions {
+    func openURL(_ url: URL) {
+        NSWorkspace.shared.open(url)
+    }
+
+    func openFilePath(_ path: String) {
+        var expandedPath = path
+        if expandedPath.hasPrefix("~") {
+            expandedPath = NSString(string: expandedPath).expandingTildeInPath
+        }
+        let fileURL = URL(fileURLWithPath: expandedPath)
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+        } else {
+            let parentURL = fileURL.deletingLastPathComponent()
+            if FileManager.default.fileExists(atPath: parentURL.path) {
+                NSWorkspace.shared.activateFileViewerSelecting([parentURL])
+            }
+        }
+    }
+}
+
 // MARK: - TiptapEditorView (macOS NSViewRepresentable)
 
 struct TiptapEditorView: NSViewRepresentable {
@@ -14,14 +38,9 @@ struct TiptapEditorView: NSViewRepresentable {
         let config = WKWebViewConfiguration()
         let userContentController = WKUserContentController()
 
-        userContentController.add(context.coordinator, name: "contentChanged")
-        userContentController.add(context.coordinator, name: "editorReady")
-        userContentController.add(context.coordinator, name: "openLink")
-        userContentController.add(context.coordinator, name: "openFilePath")
-        userContentController.add(context.coordinator, name: "openGroup")
-        userContentController.add(context.coordinator, name: "navigateBack")
-        userContentController.add(context.coordinator, name: "requestMentionItems")
-        userContentController.add(context.coordinator, name: "openMention")
+        for name in TiptapMessageHandler.messageHandlerNames {
+            userContentController.add(context.coordinator, name: name)
+        }
 
         config.userContentController = userContentController
         config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
@@ -55,10 +74,12 @@ struct TiptapEditorView: NSViewRepresentable {
     // MARK: - Coordinator
 
     class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
-        let viewModel: TiptapEditorViewModel
+        let messageHandler: TiptapMessageHandler
+        let platformActions: MacOSTiptapPlatformActions
 
         init(viewModel: TiptapEditorViewModel) {
-            self.viewModel = viewModel
+            self.platformActions = MacOSTiptapPlatformActions()
+            self.messageHandler = TiptapMessageHandler(viewModel: viewModel, platformActions: platformActions)
         }
 
         func userContentController(
@@ -66,64 +87,7 @@ struct TiptapEditorView: NSViewRepresentable {
             didReceive message: WKScriptMessage
         ) {
             Task { @MainActor in
-                switch message.name {
-                case "editorReady":
-                    viewModel.handleEditorReady()
-
-                case "contentChanged":
-                    if let markdown = message.body as? String {
-                        viewModel.handleContentChanged(markdown)
-                    }
-
-                case "openLink":
-                    if let urlString = message.body as? String,
-                       let url = URL(string: urlString) {
-                        NSWorkspace.shared.open(url)
-                    }
-
-                case "openFilePath":
-                    if let filePath = message.body as? String {
-                        var expandedPath = filePath
-                        // Handle ~ (home directory) paths
-                        if expandedPath.hasPrefix("~") {
-                            expandedPath = NSString(string: expandedPath).expandingTildeInPath
-                        }
-                        let fileURL = URL(fileURLWithPath: expandedPath)
-                        if FileManager.default.fileExists(atPath: fileURL.path) {
-                            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
-                        } else {
-                            // File doesn't exist, try to open parent directory
-                            let parentURL = fileURL.deletingLastPathComponent()
-                            if FileManager.default.fileExists(atPath: parentURL.path) {
-                                NSWorkspace.shared.activateFileViewerSelecting([parentURL])
-                            }
-                        }
-                    }
-
-                case "openGroup":
-                    if let groupData = message.body as? [String: Any],
-                       let groupId = groupData["id"] as? String,
-                       let groupTitle = groupData["title"] as? String {
-                        viewModel.navigateIntoGroup(id: groupId, title: groupTitle)
-                    }
-
-                case "navigateBack":
-                    if viewModel.groupNavigation.isInsideGroup {
-                        viewModel.navigateBack()
-                    }
-
-                case "requestMentionItems":
-                    let query = message.body as? String ?? ""
-                    viewModel.handleMentionItemsRequest(query: query)
-
-                case "openMention":
-                    if let data = message.body as? [String: Any] {
-                        viewModel.handleOpenMention(data: data)
-                    }
-
-                default:
-                    break
-                }
+                messageHandler.handleMessage(message)
             }
         }
 

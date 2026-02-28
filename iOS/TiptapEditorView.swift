@@ -1,6 +1,14 @@
 import SwiftUI
 import WebKit
 
+// MARK: - iOS Platform Actions
+
+class iOSTiptapPlatformActions: TiptapPlatformActions {
+    func openURL(_ url: URL) {
+        UIApplication.shared.open(url)
+    }
+}
+
 // MARK: - TiptapEditorView (iOS UIViewRepresentable)
 
 struct TiptapEditorView: UIViewRepresentable {
@@ -14,9 +22,9 @@ struct TiptapEditorView: UIViewRepresentable {
         let config = WKWebViewConfiguration()
         let userContentController = WKUserContentController()
 
-        userContentController.add(context.coordinator, name: "contentChanged")
-        userContentController.add(context.coordinator, name: "editorReady")
-        userContentController.add(context.coordinator, name: "openLink")
+        for name in TiptapMessageHandler.messageHandlerNames {
+            userContentController.add(context.coordinator, name: name)
+        }
 
         config.userContentController = userContentController
         config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
@@ -44,10 +52,12 @@ struct TiptapEditorView: UIViewRepresentable {
     // MARK: - Coordinator
 
     class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
-        let viewModel: TiptapEditorViewModel
+        let messageHandler: TiptapMessageHandler
+        let platformActions: iOSTiptapPlatformActions
 
         init(viewModel: TiptapEditorViewModel) {
-            self.viewModel = viewModel
+            self.platformActions = iOSTiptapPlatformActions()
+            self.messageHandler = TiptapMessageHandler(viewModel: viewModel, platformActions: platformActions)
         }
 
         func userContentController(
@@ -55,24 +65,7 @@ struct TiptapEditorView: UIViewRepresentable {
             didReceive message: WKScriptMessage
         ) {
             Task { @MainActor in
-                switch message.name {
-                case "editorReady":
-                    viewModel.handleEditorReady()
-
-                case "contentChanged":
-                    if let markdown = message.body as? String {
-                        viewModel.handleContentChanged(markdown)
-                    }
-
-                case "openLink":
-                    if let urlString = message.body as? String,
-                       let url = URL(string: urlString) {
-                        UIApplication.shared.open(url)
-                    }
-
-                default:
-                    break
-                }
+                messageHandler.handleMessage(message)
             }
         }
 
@@ -89,10 +82,8 @@ struct TiptapEditorView: UIViewRepresentable {
                 return
             }
 
-            // Handle link clicks - open in Safari
-            if let url = navigationAction.request.url,
-               navigationAction.navigationType == .linkActivated {
-                UIApplication.shared.open(url)
+            // Handle link clicks - open in default browser
+            if navigationAction.navigationType == .linkActivated {
                 decisionHandler(.cancel)
                 return
             }

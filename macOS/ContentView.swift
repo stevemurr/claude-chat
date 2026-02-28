@@ -30,7 +30,7 @@ struct ContentView: View {
     var body: some View {
         mainContent(noteService: dailyNoteService)
             .onAppear {
-                commandPaletteService.configure(dailyNoteService: dailyNoteService, historyService: nil)
+                commandPaletteService.configure(dailyNoteService: dailyNoteService)
                 isInputFocused = true
             }
     }
@@ -376,8 +376,6 @@ struct ContentView: View {
                let date = DailyNote.dateFromKey(dailyNote.dateKey) {
                 noteService.selectDate(date)
             }
-        case .chat:
-            break
         }
     }
 
@@ -472,39 +470,20 @@ struct ContentView: View {
         return contextParts.isEmpty ? nil : contextParts.joined(separator: "\n\n")
     }
 
-    private func processResponseWithNoteUpdates(_ text: String, noteService: DailyNoteService) -> (cleanedText: String, toolUpdates: [(dateKey: String, content: String)]) {
-        let (updates, cleanedText) = NoteUpdateParser.parse(text)
-        var toolUpdates: [(dateKey: String, content: String)] = []
+    /// Process a response message: parse note updates, add chat messages
+    private func handleResponse(_ text: String, noteService: DailyNoteService) {
+        let (cleanedText, toolUpdates) = noteService.processResponseWithNoteUpdates(text)
 
-        for update in updates {
-            if var existingNote = noteService.notesByDate[update.dateKey] {
-                existingNote.content = update.content
-                existingNote.updatedAt = Date()
-                noteService.notesByDate[update.dateKey] = existingNote
-
-                if noteService.currentNote.dateKey == update.dateKey {
-                    noteService.currentNote.content = update.content
-                    noteService.currentNote.updatedAt = Date()
-                }
-            } else {
-                let newNote = DailyNote(dateKey: update.dateKey, content: update.content)
-                noteService.notesByDate[update.dateKey] = newNote
-            }
-
-            NotificationCenter.default.post(
-                name: .noteUpdated,
-                object: nil,
-                userInfo: ["dateKey": update.dateKey]
+        for toolUpdate in toolUpdates {
+            noteService.addToolResultMessage(
+                toolName: "note_update",
+                output: "Updated note \(toolUpdate.dateKey):\n\n\(toolUpdate.content)"
             )
-
-            toolUpdates.append((dateKey: update.dateKey, content: update.content))
         }
 
-        if !updates.isEmpty {
-            noteService.saveNotes()
+        if !cleanedText.isEmpty {
+            noteService.addChatMessage(role: .assistant, content: cleanedText)
         }
-
-        return (cleanedText, toolUpdates)
     }
 
     // MARK: - Send Message
@@ -559,88 +538,30 @@ struct ContentView: View {
         Task {
             var addedMessages = Set<String>()
 
-            let responses: [String]?
-            let lastError: String?
+            let service: any ClaudeServiceProtocol = settings.useAPIService ? claudeAPIService : claudeCLIService
 
-            if settings.useAPIService {
-                responses = await claudeAPIService.sendMessage(
-                    text,
-                    noteContext: noteContext,
-                    continueConversation: shouldContinue
-                ) { update in
-                    streamingText = update.text
-                    isWorking = update.isWorking
+            let responses = await service.sendMessage(
+                text,
+                noteContext: noteContext,
+                continueConversation: shouldContinue
+            ) { update in
+                streamingText = update.text
+                isWorking = update.isWorking
 
-                    if update.isComplete && !update.text.isEmpty && !addedMessages.contains(update.text) {
-                        addedMessages.insert(update.text)
-                        let (cleanedText, toolUpdates) = processResponseWithNoteUpdates(update.text, noteService: noteService)
-
-                        // Add tool result messages for each note update
-                        for toolUpdate in toolUpdates {
-                            noteService.addToolResultMessage(
-                                toolName: "note_update",
-                                output: "Updated note \(toolUpdate.dateKey):\n\n\(toolUpdate.content)"
-                            )
-                        }
-
-                        if !cleanedText.isEmpty {
-                            noteService.addChatMessage(role: .assistant, content: cleanedText)
-                        }
-                        streamingText = ""
-                    }
+                if update.isComplete && !update.text.isEmpty && !addedMessages.contains(update.text) {
+                    addedMessages.insert(update.text)
+                    handleResponse(update.text, noteService: noteService)
+                    streamingText = ""
                 }
-                lastError = claudeAPIService.lastError
-            } else {
-                responses = await claudeCLIService.sendMessage(
-                    text,
-                    noteContext: noteContext,
-                    continueConversation: shouldContinue
-                ) { update in
-                    streamingText = update.text
-                    isWorking = update.isWorking
-
-                    if update.isComplete && !update.text.isEmpty && !addedMessages.contains(update.text) {
-                        addedMessages.insert(update.text)
-                        let (cleanedText, toolUpdates) = processResponseWithNoteUpdates(update.text, noteService: noteService)
-
-                        // Add tool result messages for each note update
-                        for toolUpdate in toolUpdates {
-                            noteService.addToolResultMessage(
-                                toolName: "note_update",
-                                output: "Updated note \(toolUpdate.dateKey):\n\n\(toolUpdate.content)"
-                            )
-                        }
-
-                        if !cleanedText.isEmpty {
-                            noteService.addChatMessage(role: .assistant, content: cleanedText)
-                        }
-                        streamingText = ""
-                    }
-                }
-                lastError = claudeCLIService.lastError
             }
 
             noteService.currentNote.conversationStarted = true
 
             if let responses = responses {
-                for response in responses {
-                    if !response.isEmpty && !addedMessages.contains(response) {
-                        let (cleanedText, toolUpdates) = processResponseWithNoteUpdates(response, noteService: noteService)
-
-                        // Add tool result messages for each note update
-                        for toolUpdate in toolUpdates {
-                            noteService.addToolResultMessage(
-                                toolName: "note_update",
-                                output: "Updated note \(toolUpdate.dateKey):\n\n\(toolUpdate.content)"
-                            )
-                        }
-
-                        if !cleanedText.isEmpty {
-                            noteService.addChatMessage(role: .assistant, content: cleanedText)
-                        }
-                    }
+                for response in responses where !response.isEmpty && !addedMessages.contains(response) {
+                    handleResponse(response, noteService: noteService)
                 }
-            } else if let error = lastError {
+            } else if let error = service.lastError {
                 noteService.addChatMessage(role: .assistant, content: "Error: \(error)")
             }
 

@@ -1,16 +1,9 @@
 import Foundation
 
-// MARK: - Static Visibility State (for AppDelegate escape key check)
-
-enum CommandPaletteState {
-    static var isVisible = false
-}
-
 // MARK: - Model
 
 enum CommandPaletteItemType {
     case dailyNote
-    case chat
     case action
 }
 
@@ -27,7 +20,6 @@ struct CommandPaletteItem: Identifiable {
     let timestamp: Date
     var score: Double
     let dailyNote: DailyNote?
-    let session: ChatSession?
     let action: CommandPaletteAction?
 
     init(dailyNote: DailyNote, score: Double = 0) {
@@ -38,19 +30,6 @@ struct CommandPaletteItem: Identifiable {
         self.timestamp = dailyNote.updatedAt
         self.score = score
         self.dailyNote = dailyNote
-        self.session = nil
-        self.action = nil
-    }
-
-    init(session: ChatSession, score: Double = 0) {
-        self.id = session.id.uuidString
-        self.type = .chat
-        self.title = session.title
-        self.preview = Self.makePreview(from: session.messages.last?.content ?? "")
-        self.timestamp = session.updatedAt
-        self.score = score
-        self.dailyNote = nil
-        self.session = session
         self.action = nil
     }
 
@@ -62,7 +41,6 @@ struct CommandPaletteItem: Identifiable {
         self.timestamp = Date()
         self.score = 100 // Actions always sort first
         self.dailyNote = nil
-        self.session = nil
         self.action = action
     }
 
@@ -167,35 +145,36 @@ func fuzzyMatch(query: String, target: String) -> Double? {
 
 @MainActor
 class CommandPaletteService: ObservableObject {
+    /// Static visibility flag for AppDelegate escape key check (avoids needing service reference)
+    nonisolated(unsafe) static var isVisibleStatic = false
+
     @Published var query: String = ""
     @Published var results: [CommandPaletteItem] = []
     @Published var selectedIndex: Int = 0
     @Published var isVisible: Bool = false
 
     private var dailyNoteService: DailyNoteService?
-    private var historyService: ChatHistoryService?
 
     private let actions: [CommandPaletteItem] = [
         CommandPaletteItem(action: .newChat, title: "New Chat", preview: "Start a new conversation"),
         CommandPaletteItem(action: .newNote, title: "Today's Note", preview: "Open today's daily note"),
     ]
 
-    func configure(dailyNoteService: DailyNoteService, historyService: ChatHistoryService? = nil) {
+    func configure(dailyNoteService: DailyNoteService) {
         self.dailyNoteService = dailyNoteService
-        self.historyService = historyService
     }
 
     func show() {
         query = ""
         selectedIndex = 0
         isVisible = true
-        CommandPaletteState.isVisible = true
+        Self.isVisibleStatic = true
         computeRecentItems()
     }
 
     func dismiss() {
         isVisible = false
-        CommandPaletteState.isVisible = false
+        Self.isVisibleStatic = false
         query = ""
         results = []
     }
@@ -213,10 +192,9 @@ class CommandPaletteService: ObservableObject {
             $0.title.lowercased().contains(loweredQuery)
         }
 
-        // Search daily notes and chats
+        // Search daily notes
         var searchItems: [CommandPaletteItem] = []
 
-        // Search daily notes: fuzzy on display title, substring-only on content
         if let dailyNoteService = dailyNoteService {
             for note in dailyNoteService.allNotes {
                 let titleScore = fuzzyMatch(query: query, target: note.displayTitle)
@@ -224,19 +202,6 @@ class CommandPaletteService: ObservableObject {
                 let bestScore = max(titleScore ?? 0, contentHit)
                 if bestScore > 0 {
                     searchItems.append(CommandPaletteItem(dailyNote: note, score: bestScore))
-                }
-            }
-        }
-
-        // Search chat sessions: fuzzy on title, substring-only on last message
-        if let historyService = historyService {
-            for session in historyService.sessions {
-                let titleScore = fuzzyMatch(query: query, target: session.title)
-                let lastMessage = session.messages.last?.content ?? ""
-                let messageHit = lastMessage.lowercased().contains(loweredQuery) ? 0.5 : 0.0
-                let bestScore = max(titleScore ?? 0, messageHit)
-                if bestScore > 0 {
-                    searchItems.append(CommandPaletteItem(session: session, score: bestScore))
                 }
             }
         }
@@ -274,12 +239,6 @@ class CommandPaletteService: ObservableObject {
         if let dailyNoteService = dailyNoteService {
             for note in dailyNoteService.allNotes {
                 recentItems.append(CommandPaletteItem(dailyNote: note))
-            }
-        }
-
-        if let historyService = historyService {
-            for session in historyService.sessions {
-                recentItems.append(CommandPaletteItem(session: session))
             }
         }
 

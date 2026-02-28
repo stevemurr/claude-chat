@@ -26,16 +26,7 @@ class TitleService: ObservableObject {
         process.standardOutput = pipe
         process.standardError = errorPipe
 
-        // Same PATH/env setup as ClaudeService
-        var env = ProcessInfo.processInfo.environment
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
-        let localBin = "\(homeDir)/.local/bin"
-        if let existingPath = env["PATH"] {
-            env["PATH"] = "\(localBin):/usr/local/bin:/opt/homebrew/bin:" + existingPath
-        } else {
-            env["PATH"] = "\(localBin):/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
-        }
-        process.environment = env
+        process.environment = ProcessEnvironment.environmentWithCLIPaths()
 
         do {
             try process.run()

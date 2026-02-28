@@ -1,12 +1,16 @@
 import Foundation
+import os
 
 @MainActor
 class DailyNoteService: ObservableObject {
+    private static let logger = Logger(subsystem: "com.claude.ClaudeChat", category: "DailyNoteService")
+
     @Published var notesByDate: [String: DailyNote] = [:]
     @Published var selectedDate: Date = Date()
     @Published var currentNote: DailyNote
     @Published var isSyncing = false
     @Published var syncError: String?
+    @Published var lastError: String?
 
     private let savePath: URL
     private let syncService = SyncService()
@@ -18,8 +22,6 @@ class DailyNoteService: ObservableObject {
         let appDir = appSupport.appendingPathComponent("ClaudeChat", isDirectory: true)
         try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
         self.savePath = appDir.appendingPathComponent("daily_notes.json")
-        print("Using local storage: \(self.savePath)")
-
         self.currentNote = DailyNote(date: Date())
 
         loadNotes()
@@ -51,15 +53,18 @@ class DailyNoteService: ObservableObject {
     func performSync() async {
         guard !isSyncing else { return }
 
-        print("[DailyNoteService] Starting sync with \(notesByDate.count) notes")
         isSyncing = true
         syncError = nil
 
+        // Flush currentNote into notesByDate before syncing to prevent data loss
+        if currentNote.hasContent || !currentNote.chatMessages.isEmpty {
+            notesByDate[currentNote.dateKey] = currentNote
+        }
+
         if let mergedNotes = await syncService.sync(localNotes: notesByDate) {
-            print("[DailyNoteService] Sync returned \(mergedNotes.count) notes")
             notesByDate = mergedNotes
 
-            // Update current note if it changed on server
+            // Re-read current note from merged results
             if let updatedCurrentNote = mergedNotes[currentNote.dateKey] {
                 if updatedCurrentNote.updatedAt > currentNote.updatedAt {
                     currentNote = updatedCurrentNote
@@ -94,8 +99,10 @@ class DailyNoteService: ObservableObject {
         if let existing = notesByDate[key] {
             currentNote = existing
         } else {
-            // Auto-create note for this date
-            currentNote = DailyNote(date: date)
+            // Auto-create note for this date and add to notesByDate
+            let newNote = DailyNote(date: date)
+            currentNote = newNote
+            notesByDate[key] = newNote
         }
     }
 
@@ -109,18 +116,31 @@ class DailyNoteService: ObservableObject {
             let notes = try JSONDecoder().decode([DailyNote].self, from: data)
             notesByDate = Dictionary(uniqueKeysWithValues: notes.map { ($0.dateKey, $0) })
         } catch {
-            print("Failed to load daily notes: \(error)")
+            Self.logger.error("Failed to load notes: \(error.localizedDescription)")
+            lastError = "Failed to load notes: \(error.localizedDescription)"
         }
     }
 
     private func saveNotesLocally() {
+        let notesToSave = notesByDate.values.filter { $0.hasContent || !$0.chatMessages.isEmpty }
+        let path = savePath
+
+        // Encode on main thread (fast), write on background thread (potentially slow)
         do {
-            // Only persist notes with content
-            let notesToSave = notesByDate.values.filter { $0.hasContent || !$0.chatMessages.isEmpty }
             let data = try JSONEncoder().encode(Array(notesToSave))
-            try data.write(to: savePath)
+            Task.detached(priority: .utility) {
+                do {
+                    try data.write(to: path, options: .atomic)
+                } catch {
+                    Self.logger.error("Failed to write notes to disk: \(error.localizedDescription)")
+                    await MainActor.run { [weak self] in
+                        self?.lastError = "Failed to save notes: \(error.localizedDescription)"
+                    }
+                }
+            }
         } catch {
-            print("Failed to save daily notes: \(error)")
+            Self.logger.error("Failed to encode notes: \(error.localizedDescription)")
+            lastError = "Failed to encode notes: \(error.localizedDescription)"
         }
     }
 
@@ -200,5 +220,43 @@ class DailyNoteService: ObservableObject {
             toolOutput: output
         )
         currentNote.chatMessages.append(message)
+    }
+
+    // MARK: - Note Update Processing
+
+    /// Process a Claude response for note updates. Returns cleaned text and applied updates.
+    func processResponseWithNoteUpdates(_ text: String) -> (cleanedText: String, toolUpdates: [(dateKey: String, content: String)]) {
+        let (updates, cleanedText) = NoteUpdateParser.parse(text)
+        var toolUpdates: [(dateKey: String, content: String)] = []
+
+        for update in updates {
+            if var existingNote = notesByDate[update.dateKey] {
+                existingNote.content = update.content
+                existingNote.updatedAt = Date()
+                notesByDate[update.dateKey] = existingNote
+
+                if currentNote.dateKey == update.dateKey {
+                    currentNote.content = update.content
+                    currentNote.updatedAt = Date()
+                }
+            } else {
+                let newNote = DailyNote(dateKey: update.dateKey, content: update.content)
+                notesByDate[update.dateKey] = newNote
+            }
+
+            NotificationCenter.default.post(
+                name: .noteUpdated,
+                object: nil,
+                userInfo: ["dateKey": update.dateKey]
+            )
+
+            toolUpdates.append((dateKey: update.dateKey, content: update.content))
+        }
+
+        if !updates.isEmpty {
+            saveNotes()
+        }
+
+        return (cleanedText, toolUpdates)
     }
 }

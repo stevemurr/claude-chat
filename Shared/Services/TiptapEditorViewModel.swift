@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import os
 
 // MARK: - Mention Item
 
@@ -55,9 +56,17 @@ class GroupNavigationState: ObservableObject {
 
 @MainActor
 class TiptapEditorViewModel: ObservableObject {
+    private static let logger = Logger(subsystem: "com.claude.ClaudeChat", category: "TiptapEditor")
+
     weak var webView: WKWebView?
     @Published var isEditorReady = false
     @Published var groupNavigation = GroupNavigationState()
+
+    // Cached regex for extracting group markers
+    private static let groupMarkerRegex = try? NSRegularExpression(
+        pattern: "<!--\\s*group:([^:]+):([^>]+?)\\s*-->",
+        options: []
+    )
 
     private var dailyNoteService: DailyNoteService
     private var saveTimer: Timer?
@@ -66,6 +75,11 @@ class TiptapEditorViewModel: ObservableObject {
     init(dailyNoteService: DailyNoteService) {
         self.dailyNoteService = dailyNoteService
         self.currentDateKey = dailyNoteService.currentNote.dateKey
+    }
+
+    func cleanup() {
+        saveTimer?.invalidate()
+        saveTimer = nil
     }
 
     func handleEditorReady() {
@@ -88,21 +102,22 @@ class TiptapEditorViewModel: ObservableObject {
         guard isEditorReady, let webView = webView else { return }
 
         let content = note.content
-        let escaped = content
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "`", with: "\\`")
-            .replacingOccurrences(of: "$", with: "\\$")
+        let encoded = jsonEncodeForJS(content)
 
-        webView.evaluateJavaScript("window.tiptap.setContent(`\(escaped)`)") { _, error in
+        webView.evaluateJavaScript("window.tiptap.setContent(\(encoded))") { _, error in
             if let error = error {
-                print("Failed to set Tiptap content: \(error)")
+                Self.logger.error("Failed to set Tiptap content: \(error.localizedDescription)")
             }
         }
     }
 
     func focusEditor() {
         guard isEditorReady, let webView = webView else { return }
-        webView.evaluateJavaScript("window.tiptap.focus()") { _, _ in }
+        webView.evaluateJavaScript("window.tiptap.focus()") { _, error in
+            if let error = error {
+                Self.logger.error("Failed to focus editor: \(error.localizedDescription)")
+            }
+        }
     }
 
     func debounceSave() {
@@ -134,7 +149,7 @@ class TiptapEditorViewModel: ObservableObject {
             guard let self = self else { return }
 
             if let error = error {
-                print("Failed to get parent content: \(error)")
+                Self.logger.error("Failed to get parent content: \(error.localizedDescription)")
                 return
             }
 
@@ -159,6 +174,10 @@ class TiptapEditorViewModel: ObservableObject {
         // Get the current (edited) group content
         webView.evaluateJavaScript("window.tiptap.getContent()") { [weak self] result, error in
             guard let self = self else { return }
+
+            if let error = error {
+                Self.logger.error("Failed to get group content for back navigation: \(error.localizedDescription)")
+            }
 
             let editedGroupContent = result as? String ?? ""
 
@@ -218,19 +237,20 @@ class TiptapEditorViewModel: ObservableObject {
     private func loadContent(_ content: String) {
         guard let webView = webView else { return }
 
-        let escaped = escapeForJS(content)
-        webView.evaluateJavaScript("window.tiptap.setContent(`\(escaped)`)") { _, error in
+        let encoded = jsonEncodeForJS(content)
+        webView.evaluateJavaScript("window.tiptap.setContent(\(encoded))") { _, error in
             if let error = error {
-                print("Failed to load content: \(error)")
+                Self.logger.error("Failed to load content: \(error.localizedDescription)")
             }
         }
     }
 
-    private func escapeForJS(_ string: String) -> String {
-        return string
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "`", with: "\\`")
-            .replacingOccurrences(of: "$", with: "\\$")
+    private func jsonEncodeForJS(_ string: String) -> String {
+        guard let data = try? JSONEncoder().encode(string),
+              let jsonString = String(data: data, encoding: .utf8) else {
+            return "\"\""
+        }
+        return jsonString
     }
 
     // MARK: - Mention Support
@@ -285,11 +305,7 @@ class TiptapEditorViewModel: ObservableObject {
     private func extractGroups(from content: String) -> [(id: String, title: String)] {
         var groups: [(id: String, title: String)] = []
 
-        // Pattern: <!-- group:UUID:Title -->
-        let pattern = "<!--\\s*group:([^:]+):([^>]+?)\\s*-->"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return groups
-        }
+        guard let regex = Self.groupMarkerRegex else { return groups }
 
         let range = NSRange(content.startIndex..., in: content)
         let matches = regex.matches(in: content, options: [], range: range)
@@ -315,12 +331,12 @@ class TiptapEditorViewModel: ObservableObject {
                 let js = "window.receiveMentionItems(\(jsonString))"
                 webView.evaluateJavaScript(js) { _, error in
                     if let error = error {
-                        print("Failed to send mention items: \(error)")
+                        Self.logger.error("Failed to send mention items: \(error.localizedDescription)")
                     }
                 }
             }
         } catch {
-            print("Failed to encode mention items: \(error)")
+            Self.logger.error("Failed to encode mention items: \(error.localizedDescription)")
         }
     }
 

@@ -89,29 +89,4 @@ struct DailyNote: Identifiable, Codable {
         dateKeyFormatter.date(from: key)
     }
 
-    // MARK: - Content Helpers
-
-    /// Get blocks, lazily parsing from content for legacy notes
-    mutating func resolveBlocks() -> [Block] {
-        if let existing = blocks, !existing.isEmpty {
-            return existing
-        }
-        let parsed = [Block](markdown: content)
-        blocks = parsed
-        return parsed
-    }
-
-    /// Sync the content string from blocks
-    mutating func syncContentFromBlocks() {
-        guard let blocks = blocks else { return }
-        content = blocks.toMarkdown()
-    }
-
-    /// Ensure content is populated from blocks
-    mutating func ensureContentPopulated() {
-        if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           let blocks = blocks, !blocks.isEmpty {
-            content = blocks.toMarkdown()
-        }
-    }
 }

@@ -37,6 +37,13 @@ class ClaudeService: ObservableObject, ClaudeServiceProtocol {
         lastError = nil
         streamingText = ""
 
+        // Resolve claude path on MainActor before entering nonisolated context
+        guard let claudePath = SettingsManager.shared.resolveClaudePath() else {
+            lastError = "Claude CLI not found. Please set the path in Settings."
+            isLoading = false
+            return nil
+        }
+
         // Build full message with note context prepended
         let fullMessage: String
         if let context = noteContext, !context.isEmpty {
@@ -53,7 +60,7 @@ class ClaudeService: ObservableObject, ClaudeServiceProtocol {
         }
 
         let result = await Task.detached(priority: .userInitiated) {
-            await self.runClaudeStreaming(message: fullMessage, continueConversation: continueConversation, onUpdate: onUpdate)
+            await self.runClaudeStreaming(claudePath: claudePath, message: fullMessage, continueConversation: continueConversation, onUpdate: onUpdate)
         }.value
 
         switch result {
@@ -69,11 +76,7 @@ class ClaudeService: ObservableObject, ClaudeServiceProtocol {
         }
     }
 
-    private nonisolated func runClaudeStreaming(message: String, continueConversation: Bool, onUpdate: @escaping (StreamUpdate) -> Void) async -> Result<[String], ClaudeError> {
-        // Resolve claude path from settings
-        guard let claudePath = SettingsManager.shared.resolveClaudePath() else {
-            return .failure(ClaudeError(message: "Claude CLI not found. Please set the path in Settings."))
-        }
+    private nonisolated func runClaudeStreaming(claudePath: String, message: String, continueConversation: Bool, onUpdate: @escaping (StreamUpdate) -> Void) async -> Result<[String], ClaudeError> {
 
         let process = Process()
         let pipe = Pipe()
@@ -90,16 +93,7 @@ class ClaudeService: ObservableObject, ClaudeServiceProtocol {
         process.standardOutput = pipe
         process.standardError = errorPipe
 
-        // Set up environment
-        var env = ProcessInfo.processInfo.environment
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
-        let localBin = "\(homeDir)/.local/bin"
-        if let path = env["PATH"] {
-            env["PATH"] = "\(localBin):/usr/local/bin:/opt/homebrew/bin:" + path
-        } else {
-            env["PATH"] = "\(localBin):/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
-        }
-        process.environment = env
+        process.environment = ProcessEnvironment.environmentWithCLIPaths()
 
         await MainActor.run {
             self.currentProcess = process

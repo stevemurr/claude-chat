@@ -3,6 +3,12 @@ import Foundation
 /// Stateless utility for parsing note content into statistics
 enum NoteContentParser {
 
+    // Cached regex patterns - compiled once
+    private static let checkedTodoRegex = try? NSRegularExpression(pattern: #"^[-*]\s*\[[xX]\]\s+(.+)$"#)
+    private static let uncheckedTodoRegex = try? NSRegularExpression(pattern: #"^[-*]\s*\[\s\]\s+(.+)$"#)
+    private static let bulletRegex = try? NSRegularExpression(pattern: #"^[-*]\s+(?!\[[ xX]\])(.+)$"#)
+    private static let linkRegex = try? NSRegularExpression(pattern: #"\[([^\]]+)\]\(([^)]+)\)"#)
+
     /// Parse markdown content into statistics for preview cards
     static func parse(_ content: String) -> NoteContentStats {
         let lines = content.components(separatedBy: .newlines)
@@ -12,17 +18,6 @@ enum NoteContentParser {
         var bulletItems: [String] = []
         var linkCount = 0
         var videoCount = 0
-
-        // Regex patterns
-        let checkedTodoPattern = #"^[-*]\s*\[[xX]\]\s+(.+)$"#
-        let uncheckedTodoPattern = #"^[-*]\s*\[\s\]\s+(.+)$"#
-        let bulletPattern = #"^[-*]\s+(?!\[[ xX]\])(.+)$"#
-        let linkPattern = #"\[([^\]]+)\]\(([^)]+)\)"#
-
-        let checkedTodoRegex = try? NSRegularExpression(pattern: checkedTodoPattern)
-        let uncheckedTodoRegex = try? NSRegularExpression(pattern: uncheckedTodoPattern)
-        let bulletRegex = try? NSRegularExpression(pattern: bulletPattern)
-        let linkRegex = try? NSRegularExpression(pattern: linkPattern)
 
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespaces)

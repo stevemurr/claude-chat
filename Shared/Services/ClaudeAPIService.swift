@@ -52,12 +52,12 @@ class ClaudeAPIService: ObservableObject, ClaudeServiceProtocol {
     @Published var streamingText: String = ""
     @Published var isWorking: Bool = false
 
-    private var currentTask: Task<Void, Never>?
+    private var currentTask: Task<Result<[String], ClaudeError>, Never>?
 
     /// The API endpoint URL (configurable via Settings)
     var endpoint: URL {
         let urlString = SettingsManager.shared.apiEndpoint
-        return URL(string: urlString) ?? URL(string: "http://macbook-pro-8.tail11899.ts.net:8080")!
+        return URL(string: urlString) ?? URL(string: "http://localhost:8080")!
     }
 
     func sendMessage(
@@ -86,7 +86,14 @@ class ClaudeAPIService: ObservableObject, ClaudeServiceProtocol {
             fullMessage = message
         }
 
-        let result = await runAPIStreaming(message: fullMessage, onUpdate: onUpdate)
+        let task = Task {
+            await runAPIStreaming(message: fullMessage, onUpdate: onUpdate)
+        }
+        currentTask = task
+
+        let result = await task.value
+
+        currentTask = nil
 
         switch result {
         case .success(let outputs):

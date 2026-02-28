@@ -461,20 +461,7 @@ struct ChatView: View {
 
                 if update.isComplete && !update.text.isEmpty && !addedMessages.contains(update.text) {
                     addedMessages.insert(update.text)
-                    let (cleanedText, toolUpdates) = processResponseWithNoteUpdates(update.text)
-
-                    // Add tool result messages for each note update
-                    for toolUpdate in toolUpdates {
-                        dailyNoteService.addToolResultMessage(
-                            toolName: "note_update",
-                            output: "Updated note \(toolUpdate.dateKey):\n\n\(toolUpdate.content)"
-                        )
-                    }
-
-                    if !cleanedText.isEmpty {
-                        let assistantMessage = ChatMessage(role: .assistant, content: cleanedText)
-                        dailyNoteService.currentNote.chatMessages.append(assistantMessage)
-                    }
+                    handleResponse(update.text)
                     streamingText = ""
                 }
             }
@@ -482,27 +469,11 @@ struct ChatView: View {
             dailyNoteService.currentNote.conversationStarted = true
 
             if let responses = responses {
-                for response in responses {
-                    if !response.isEmpty && !addedMessages.contains(response) {
-                        let (cleanedText, toolUpdates) = processResponseWithNoteUpdates(response)
-
-                        // Add tool result messages for each note update
-                        for toolUpdate in toolUpdates {
-                            dailyNoteService.addToolResultMessage(
-                                toolName: "note_update",
-                                output: "Updated note \(toolUpdate.dateKey):\n\n\(toolUpdate.content)"
-                            )
-                        }
-
-                        if !cleanedText.isEmpty {
-                            let assistantMessage = ChatMessage(role: .assistant, content: cleanedText)
-                            dailyNoteService.currentNote.chatMessages.append(assistantMessage)
-                        }
-                    }
+                for response in responses where !response.isEmpty && !addedMessages.contains(response) {
+                    handleResponse(response)
                 }
             } else if let error = claudeService.lastError {
-                let errorMessage = ChatMessage(role: .assistant, content: "Error: \(error)")
-                dailyNoteService.currentNote.chatMessages.append(errorMessage)
+                dailyNoteService.addChatMessage(role: .assistant, content: "Error: \(error)")
             }
 
             streamingText = ""
@@ -511,39 +482,20 @@ struct ChatView: View {
         }
     }
 
-    private func processResponseWithNoteUpdates(_ text: String) -> (cleanedText: String, toolUpdates: [(dateKey: String, content: String)]) {
-        let (updates, cleanedText) = NoteUpdateParser.parse(text)
-        var toolUpdates: [(dateKey: String, content: String)] = []
+    /// Process a response message: parse note updates, add chat messages
+    private func handleResponse(_ text: String) {
+        let (cleanedText, toolUpdates) = dailyNoteService.processResponseWithNoteUpdates(text)
 
-        for update in updates {
-            if var existingNote = dailyNoteService.notesByDate[update.dateKey] {
-                existingNote.content = update.content
-                existingNote.updatedAt = Date()
-                dailyNoteService.notesByDate[update.dateKey] = existingNote
-
-                if dailyNoteService.currentNote.dateKey == update.dateKey {
-                    dailyNoteService.currentNote.content = update.content
-                    dailyNoteService.currentNote.updatedAt = Date()
-                }
-            } else {
-                let newNote = DailyNote(dateKey: update.dateKey, content: update.content)
-                dailyNoteService.notesByDate[update.dateKey] = newNote
-            }
-
-            NotificationCenter.default.post(
-                name: .noteUpdated,
-                object: nil,
-                userInfo: ["dateKey": update.dateKey]
+        for toolUpdate in toolUpdates {
+            dailyNoteService.addToolResultMessage(
+                toolName: "note_update",
+                output: "Updated note \(toolUpdate.dateKey):\n\n\(toolUpdate.content)"
             )
-
-            toolUpdates.append((dateKey: update.dateKey, content: update.content))
         }
 
-        if !updates.isEmpty {
-            dailyNoteService.saveNotes()
+        if !cleanedText.isEmpty {
+            dailyNoteService.addChatMessage(role: .assistant, content: cleanedText)
         }
-
-        return (cleanedText, toolUpdates)
     }
 }
 

@@ -238,8 +238,6 @@ struct CommandPaletteRow: View {
             return "plus.bubble"
         case .dailyNote:
             return "calendar"
-        case .chat:
-            return "bubble.left.fill"
         }
     }
 
@@ -247,7 +245,6 @@ struct CommandPaletteRow: View {
         switch item.type {
         case .action: return .green
         case .dailyNote: return .orange
-        case .chat: return .blue
         }
     }
 }

@@ -16,7 +16,7 @@ struct SettingsView: View {
                             .font(.subheadline)
                             .foregroundColor(.secondary)
 
-                        TextField("http://macbook-pro-8.tail11899.ts.net:8080", text: $settings.apiEndpoint)
+                        TextField("http://your-server:8080", text: $settings.apiEndpoint)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(.body, design: .monospaced))
                             .autocapitalization(.none)
@@ -99,7 +99,7 @@ struct SettingsView: View {
                             .font(.subheadline)
                             .foregroundColor(.secondary)
 
-                        TextField("http://macbook-pro-8.tail11899.ts.net:8081", text: $settings.syncServerURL)
+                        TextField("http://your-server:8081", text: $settings.syncServerURL)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(.body, design: .monospaced))
                             .autocapitalization(.none)

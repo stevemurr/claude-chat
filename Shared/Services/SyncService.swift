@@ -1,14 +1,17 @@
 import Foundation
+import os
 
 /// Service for syncing notes with a remote server
 @MainActor
 class SyncService: ObservableObject {
+    private static let logger = Logger(subsystem: "com.claude.ClaudeChat", category: "SyncService")
+
     @Published var isSyncing = false
     @Published var lastSyncTime: Date?
     @Published var syncError: String?
 
     private var syncEndpoint: URL? {
-        guard let urlString = UserDefaults.standard.string(forKey: "syncServerURL"),
+        guard let urlString = UserDefaults.standard.string(forKey: SettingsKeys.syncServerURL),
               !urlString.isEmpty,
               let url = URL(string: urlString) else {
             return nil
@@ -33,12 +36,11 @@ class SyncService: ObservableObject {
     /// Perform a full two-way sync with the server
     func sync(localNotes: [String: DailyNote]) async -> [String: DailyNote]? {
         guard let baseURL = syncEndpoint else {
-            print("[SyncService] No sync endpoint configured. URL from defaults: \(UserDefaults.standard.string(forKey: "syncServerURL") ?? "nil")")
             syncError = "Sync server not configured"
             return nil
         }
 
-        print("[SyncService] Starting sync with \(baseURL), \(localNotes.count) local notes")
+        Self.logger.info("Starting sync with \(baseURL), \(localNotes.count) local notes")
 
         isSyncing = true
         syncError = nil
@@ -77,7 +79,7 @@ class SyncService: ObservableObject {
             // Update last sync time
             if let serverTime = ISO8601DateFormatter().date(from: syncResponse.serverTime) {
                 lastSyncTime = serverTime
-                UserDefaults.standard.set(serverTime.timeIntervalSince1970, forKey: "lastSyncTime")
+                UserDefaults.standard.set(serverTime.timeIntervalSince1970, forKey: SettingsKeys.lastSyncTime)
             }
 
             // Merge server notes with local notes
@@ -97,7 +99,7 @@ class SyncService: ObservableObject {
 
         } catch {
             syncError = error.localizedDescription
-            print("[SyncService] Sync error: \(error)")
+            Self.logger.error("Sync error: \(error.localizedDescription)")
             return nil
         }
     }
@@ -127,7 +129,7 @@ class SyncService: ObservableObject {
             return true
 
         } catch {
-            print("Push note error: \(error)")
+            Self.logger.error("Push note error: \(error.localizedDescription)")
             return false
         }
     }
@@ -155,7 +157,7 @@ class SyncService: ObservableObject {
             return try decoder.decode([DailyNote].self, from: data)
 
         } catch {
-            print("Fetch notes error: \(error)")
+            Self.logger.error("Fetch notes error: \(error.localizedDescription)")
             return nil
         }
     }
@@ -163,7 +165,7 @@ class SyncService: ObservableObject {
     // MARK: - Configuration
 
     func loadLastSyncTime() {
-        let timestamp = UserDefaults.standard.double(forKey: "lastSyncTime")
+        let timestamp = UserDefaults.standard.double(forKey: SettingsKeys.lastSyncTime)
         if timestamp > 0 {
             lastSyncTime = Date(timeIntervalSince1970: timestamp)
         }

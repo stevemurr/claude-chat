@@ -14,6 +14,7 @@ private func carbonHotkeyCallback(
     return noErr
 }
 
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow?
     private var statusItem: NSStatusItem?

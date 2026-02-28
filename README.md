@@ -1,145 +1,156 @@
-# ClaudeChat
+<p align="center">
+  <img src="https://img.shields.io/badge/macOS-13%2B-black?style=for-the-badge&logo=apple&logoColor=white" alt="macOS 13+">
+  <img src="https://img.shields.io/badge/Swift-5.9-F05138?style=for-the-badge&logo=swift&logoColor=white" alt="Swift 5.9">
+  <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="MIT License">
+</p>
 
-A lightweight macOS app for quick Q&A with Claude via the Claude Code CLI. Summon it with a global hotkey for fast, focused conversations.
+<h1 align="center">ClaudeChat</h1>
 
-![ClaudeChat Demo](https://img.shields.io/badge/macOS-13%2B-blue)
-![Swift](https://img.shields.io/badge/Swift-5.9-orange)
-![License](https://img.shields.io/badge/License-MIT-green)
+<p align="center">
+  <strong>A native macOS app for instant access to Claude AI</strong><br>
+  Summon with a hotkey. Ask anything. Get back to work.
+</p>
 
-## Features
+<p align="center">
+  <a href="#-quick-start">Quick Start</a> •
+  <a href="#-features">Features</a> •
+  <a href="#%EF%B8%8F-installation">Installation</a> •
+  <a href="#-usage">Usage</a>
+</p>
 
-- **Global Hotkey**: Summon the chat window from anywhere (default: `Cmd+Shift+Space`)
-- **Streaming Responses**: See Claude's responses as they're generated
-- **Tool Support**: Full access to Claude's tools including web search
-- **Markdown Rendering**: Code blocks, headers, lists, and more
-- **Conversation History**: Browse and resume past conversations
-- **Floating Window**: Stays above other windows when focused
-- **No Dock Icon**: Runs as a menu bar agent
-- **Notepad**: Rich text notes with Tiptap editor, AI-generated titles, and local persistence
-- **Command Palette**: Fuzzy search across notes and chat history (`Cmd+K`)
+---
 
-## Requirements
+## Why ClaudeChat?
 
-- macOS 13.0 or later
-- [Claude Code CLI](https://claude.ai/code) installed
-- Xcode 15+ (for building)
+You're deep in work. You need a quick answer from Claude. You don't want to:
+- Open a browser tab
+- Wait for a web app to load
+- Lose your flow
 
-## Installation
+**ClaudeChat lives in your menu bar.** One hotkey and you're chatting. Escape and it's gone.
 
-### Option 1: Build from Source
+---
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/stevemurr/claude-chat.git
-   cd claude-chat
-   ```
+## ⚡ Quick Start
 
-2. Install xcodegen (if not installed):
-   ```bash
-   brew install xcodegen
-   ```
+```bash
+# Clone & build
+git clone https://github.com/stevemurr/claude-chat.git
+cd claude-chat
+brew install xcodegen && xcodegen generate
+open ClaudeChat.xcodeproj  # Press Cmd+R to run
+```
 
-3. Generate the Xcode project:
-   ```bash
-   xcodegen generate
-   ```
+> **Requires:** [Claude Code CLI](https://claude.ai/code) installed
 
-4. Open and build:
-   ```bash
-   open ClaudeChat.xcodeproj
-   ```
+---
 
-5. Press `Cmd+R` to build and run
+## ✨ Features
 
-### Option 2: Download Release
+| Feature | Description |
+|---------|-------------|
+| 🎯 **Global Hotkey** | `Cmd+Shift+Space` summons Claude from anywhere |
+| ⚡ **Streaming** | See responses as they're generated |
+| 🛠️ **Full Tools** | Web search, file access, everything Claude can do |
+| 📝 **Daily Notes** | Rich text editor with markdown, tables, and code blocks |
+| 🔗 **@Mentions** | Link between notes and groups with `@` |
+| 🔍 **Command Palette** | `Cmd+K` to search everything |
+| 📁 **Groups** | Organize content into collapsible pages |
+| 👻 **Menu Bar Only** | No dock icon, no distractions |
 
-Download the latest release from the [Releases](https://github.com/stevemurr/claude-chat/releases) page.
+---
 
-## Setup
+## 🛠️ Installation
 
-### Claude CLI Path
+### Build from Source
 
-ClaudeChat will attempt to auto-detect your Claude CLI installation. If it's not found automatically, you can set the path manually in Settings:
+```bash
+git clone https://github.com/stevemurr/claude-chat.git
+cd claude-chat
+brew install xcodegen
+xcodegen generate
+open ClaudeChat.xcodeproj
+# Press Cmd+R to build and run
+```
 
-1. Open ClaudeChat
-2. Click the gear icon (⚙️) in the header
-3. Set the path to your Claude CLI (e.g., `~/.local/bin/claude`)
+### Download Release
 
-Common installation paths:
-- `~/.local/bin/claude` (npm global install)
-- `/usr/local/bin/claude`
-- `/opt/homebrew/bin/claude`
+Grab the latest `.app` from [Releases](https://github.com/stevemurr/claude-chat/releases).
 
-### Accessibility Permissions
+---
 
-For the global hotkey to work when other apps are focused, you need to grant accessibility permissions:
+## 🔧 Setup
 
-1. Go to **System Settings → Privacy & Security → Accessibility**
-2. Click the **+** button
-3. Add **ClaudeChat.app** (or **Xcode** if running from Xcode)
-4. Enable the toggle
+### 1. Claude CLI Path
 
-## Usage
+ClaudeChat auto-detects your Claude CLI. If not found, set it in Settings (⚙️):
+
+```
+~/.local/bin/claude        # npm global
+/usr/local/bin/claude      # standard
+/opt/homebrew/bin/claude   # homebrew
+```
+
+### 2. Accessibility Permission
+
+For the global hotkey to work everywhere:
+
+**System Settings → Privacy & Security → Accessibility → Add ClaudeChat.app**
+
+---
+
+## 🎮 Usage
 
 | Action | Shortcut |
 |--------|----------|
-| Toggle window | `Cmd+Shift+Space` (configurable) |
-| New chat | `Cmd+N` |
+| Toggle window | `Cmd+Shift+Space` |
 | Send message | `Enter` |
-| Newline in message | `Shift+Enter` |
-| Hide window | `Escape` |
+| New line | `Shift+Enter` |
 | Command palette | `Cmd+K` |
+| New chat | `Cmd+N` |
+| Hide | `Escape` |
 
-## Configuration
+### Notes Editor
 
-Click the gear icon in the header to access settings:
+| Action | How |
+|--------|-----|
+| Slash commands | Type `/` for blocks |
+| Link notes | Type `@` to mention |
+| Create group | Select text + `Cmd+G` |
+| Navigate back | `Escape` |
 
-- **Global Hotkey**: Click the hotkey box and press your desired key combination
-- **Claude CLI Path**: Path to your Claude Code CLI installation
+---
 
-## Architecture
+## 🏗️ Architecture
 
 ```
-ClaudeChat/
-├── ClaudeChatApp.swift      # App entry point
-├── AppDelegate.swift        # Hotkey registration, window management
-├── ContentView.swift        # Main chat UI with tab switching
-├── ChatMessage.swift        # Message model
-├── ChatSession.swift        # Session model and history
-├── ClaudeService.swift      # Claude CLI subprocess wrapper
-├── SettingsView.swift       # Settings UI and manager
-├── Note.swift               # Note model with block support
-├── Block.swift              # Block-based content model
-├── NoteService.swift        # Note persistence and management
-├── NotepadView.swift        # Notes sidebar and content view
-├── TiptapEditorView.swift   # WKWebView wrapper for Tiptap
-├── TitleService.swift       # AI-powered title generation
-├── CommandPalette.swift     # Fuzzy search service
-├── CommandPaletteView.swift # Search overlay UI
-└── Resources/
-    ├── tiptap-editor.html   # Editor HTML template
-    └── tiptap-bundle.js     # Bundled Tiptap editor
+macOS/                          # macOS-specific code
+├── AppDelegate.swift            # Hotkey, window management
+├── ClaudeService.swift          # CLI subprocess wrapper
+├── ContentView.swift            # Main UI
+├── TiptapEditorView.swift       # WKWebView Tiptap wrapper
+└── CommandPaletteView.swift
+Shared/                         # Cross-platform code
+├── Models/                      # ChatMessage, DailyNote, Block
+├── Services/                    # DailyNoteService, SyncService, etc.
+└── Views/                       # NotepadView, CalendarView, etc.
+web/                            # Tiptap editor JS bundle
 ```
 
-## How It Works
+---
 
-ClaudeChat wraps the Claude Code CLI (`claude -p`) in a native macOS interface:
+## 🤝 Contributing
 
-1. Messages are sent via `claude -p "<message>" --output-format stream-json`
-2. Responses are streamed and rendered in real-time
-3. Conversation context is maintained using the `-c` flag
-4. Full tool access is enabled with `--tools default --dangerously-skip-permissions`
+PRs welcome! This is a personal project built for daily use.
 
-## Contributing
+---
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+## 📄 License
 
-## License
+MIT — do whatever you want with it.
 
-MIT License - see [LICENSE](LICENSE) for details.
+---
 
-## Acknowledgments
-
-- Built with [SwiftUI](https://developer.apple.com/xcode/swiftui/)
-- Markdown rendering by [MarkdownUI](https://github.com/gonzalezreal/swift-markdown-ui)
-- Powered by [Claude Code CLI](https://claude.ai/code)
+<p align="center">
+  Built with SwiftUI • Powered by <a href="https://claude.ai/code">Claude Code CLI</a>
+</p>

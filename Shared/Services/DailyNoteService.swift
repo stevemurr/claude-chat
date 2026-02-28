@@ -224,23 +224,44 @@ class DailyNoteService: ObservableObject {
 
     // MARK: - Note Update Processing
 
-    /// Process a Claude response for note updates. Returns cleaned text and applied updates.
-    func processResponseWithNoteUpdates(_ text: String) -> (cleanedText: String, toolUpdates: [(dateKey: String, content: String)]) {
+    /// Process a Claude response for note updates. Returns cleaned text and applied updates with operation info.
+    func processResponseWithNoteUpdates(_ text: String) -> (cleanedText: String, toolUpdates: [(dateKey: String, operation: String, content: String, error: String?)]) {
         let (updates, cleanedText) = NoteUpdateParser.parse(text)
-        var toolUpdates: [(dateKey: String, content: String)] = []
+        var toolUpdates: [(dateKey: String, operation: String, content: String, error: String?)] = []
 
         for update in updates {
+            let existingContent = notesByDate[update.dateKey]?.content ?? ""
+
+            let result = NoteUpdateExecutor.apply(
+                existingContent: existingContent,
+                operation: update.operation,
+                content: update.content,
+                match: update.match
+            )
+
+            if let error = result.error {
+                let errorMessage: String
+                switch error {
+                case .matchNotFound(let match):
+                    errorMessage = "Could not find '\(match)' in the note."
+                case .emptyMatch:
+                    errorMessage = "Missing match attribute for \(update.operation.rawValue) operation."
+                }
+                toolUpdates.append((dateKey: update.dateKey, operation: update.operation.rawValue, content: existingContent, error: errorMessage))
+                continue
+            }
+
             if var existingNote = notesByDate[update.dateKey] {
-                existingNote.content = update.content
+                existingNote.content = result.content
                 existingNote.updatedAt = Date()
                 notesByDate[update.dateKey] = existingNote
 
                 if currentNote.dateKey == update.dateKey {
-                    currentNote.content = update.content
+                    currentNote.content = result.content
                     currentNote.updatedAt = Date()
                 }
             } else {
-                let newNote = DailyNote(dateKey: update.dateKey, content: update.content)
+                let newNote = DailyNote(dateKey: update.dateKey, content: result.content)
                 notesByDate[update.dateKey] = newNote
             }
 
@@ -250,7 +271,7 @@ class DailyNoteService: ObservableObject {
                 userInfo: ["dateKey": update.dateKey]
             )
 
-            toolUpdates.append((dateKey: update.dateKey, content: update.content))
+            toolUpdates.append((dateKey: update.dateKey, operation: update.operation.rawValue, content: result.content, error: nil))
         }
 
         if !updates.isEmpty {

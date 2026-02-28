@@ -475,10 +475,17 @@ struct ContentView: View {
         let (cleanedText, toolUpdates) = noteService.processResponseWithNoteUpdates(text)
 
         for toolUpdate in toolUpdates {
-            noteService.addToolResultMessage(
-                toolName: "note_update",
-                output: "Updated note \(toolUpdate.dateKey):\n\n\(toolUpdate.content)"
-            )
+            if let error = toolUpdate.error {
+                noteService.addToolResultMessage(
+                    toolName: "note_update",
+                    output: "Failed to \(toolUpdate.operation) on note \(toolUpdate.dateKey): \(error)"
+                )
+            } else {
+                noteService.addToolResultMessage(
+                    toolName: "note_update",
+                    output: "\(toolUpdate.operation) on note \(toolUpdate.dateKey)"
+                )
+            }
         }
 
         if !cleanedText.isEmpty {

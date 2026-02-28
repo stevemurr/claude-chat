@@ -1,46 +1,105 @@
 import Foundation
 
+enum NoteUpdateOperation: String {
+    case append
+    case prepend
+    case replaceAll = "replace-all"
+    case replace
+    case delete
+    case insertAfter = "insert-after"
+}
+
 struct NoteUpdate {
     let dateKey: String
+    let operation: NoteUpdateOperation
     let content: String
+    let match: String?
 }
 
 struct NoteUpdateParser {
     /// Parse note updates from Claude's response
     /// Returns extracted updates AND cleaned text (with tags removed) for display
     static func parse(_ text: String) -> (updates: [NoteUpdate], cleanedText: String) {
-        // Pattern: <note-update date="YYYY-MM-DD">content</note-update>
-        // Using [\s\S]*? for content to match across newlines (non-greedy)
-        let pattern = #"<note-update\s+date="(\d{4}-\d{2}-\d{2})">([\s\S]*?)</note-update>"#
-
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return (updates: [], cleanedText: text)
-        }
-
-        let nsText = text as NSString
-        let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
-
         var updates: [NoteUpdate] = []
+        var cleanedText = text
 
-        for match in matches {
-            guard match.numberOfRanges >= 3,
-                  let dateRange = Range(match.range(at: 1), in: text),
-                  let contentRange = Range(match.range(at: 2), in: text) else {
-                continue
+        // Pattern 1: Self-closing tags (for delete)
+        // <note-update date="..." op="..." match="..." />
+        let selfClosingPattern = #"<note-update\s+date="(\d{4}-\d{2}-\d{2})"(?:\s+op="([^"]*)")?(?:\s+match="([^"]*)")?\s*/>"#
+
+        if let selfClosingRegex = try? NSRegularExpression(pattern: selfClosingPattern, options: []) {
+            let nsText = cleanedText as NSString
+            let matches = selfClosingRegex.matches(in: cleanedText, range: NSRange(location: 0, length: nsText.length))
+
+            for match in matches.reversed() {
+                guard match.numberOfRanges >= 2,
+                      let dateRange = Range(match.range(at: 1), in: cleanedText) else {
+                    continue
+                }
+
+                let dateKey = String(cleanedText[dateRange])
+
+                let opString: String? = match.range(at: 2).location != NSNotFound
+                    ? Range(match.range(at: 2), in: cleanedText).map { String(cleanedText[$0]) }
+                    : nil
+
+                let matchString: String? = match.numberOfRanges >= 4 && match.range(at: 3).location != NSNotFound
+                    ? Range(match.range(at: 3), in: cleanedText).map { String(cleanedText[$0]) }
+                    : nil
+
+                let operation = opString.flatMap { NoteUpdateOperation(rawValue: $0) } ?? .replaceAll
+
+                updates.insert(NoteUpdate(dateKey: dateKey, operation: operation, content: "", match: matchString), at: 0)
             }
 
-            let dateKey = String(text[dateRange])
-            let content = String(text[contentRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-
-            updates.append(NoteUpdate(dateKey: dateKey, content: content))
+            // Remove self-closing tags from display text
+            cleanedText = selfClosingRegex.stringByReplacingMatches(
+                in: cleanedText,
+                range: NSRange(location: 0, length: (cleanedText as NSString).length),
+                withTemplate: ""
+            )
         }
 
-        // Remove the note-update tags from the display text
-        let cleanedText = regex.stringByReplacingMatches(
-            in: text,
-            range: NSRange(location: 0, length: nsText.length),
-            withTemplate: ""
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        // Pattern 2: Content tags (for everything else)
+        // <note-update date="..." op="..." match="...">content</note-update>
+        let contentPattern = #"<note-update\s+date="(\d{4}-\d{2}-\d{2})"(?:\s+op="([^"]*)")?(?:\s+match="([^"]*)")?>([\s\S]*?)</note-update>"#
+
+        if let contentRegex = try? NSRegularExpression(pattern: contentPattern, options: []) {
+            let nsText = cleanedText as NSString
+            let matches = contentRegex.matches(in: cleanedText, range: NSRange(location: 0, length: nsText.length))
+
+            for match in matches {
+                guard match.numberOfRanges >= 5,
+                      let dateRange = Range(match.range(at: 1), in: cleanedText),
+                      let contentRange = Range(match.range(at: 4), in: cleanedText) else {
+                    continue
+                }
+
+                let dateKey = String(cleanedText[dateRange])
+                let content = String(cleanedText[contentRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+
+                let opString: String? = match.range(at: 2).location != NSNotFound
+                    ? Range(match.range(at: 2), in: cleanedText).map { String(cleanedText[$0]) }
+                    : nil
+
+                let matchString: String? = match.range(at: 3).location != NSNotFound
+                    ? Range(match.range(at: 3), in: cleanedText).map { String(cleanedText[$0]) }
+                    : nil
+
+                let operation = opString.flatMap { NoteUpdateOperation(rawValue: $0) } ?? .replaceAll
+
+                updates.append(NoteUpdate(dateKey: dateKey, operation: operation, content: content, match: matchString))
+            }
+
+            // Remove content tags from display text
+            cleanedText = contentRegex.stringByReplacingMatches(
+                in: cleanedText,
+                range: NSRange(location: 0, length: (cleanedText as NSString).length),
+                withTemplate: ""
+            )
+        }
+
+        cleanedText = cleanedText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         return (updates: updates, cleanedText: cleanedText)
     }

@@ -1,6 +1,21 @@
 import Foundation
 import os
 
+/// ISO 8601 date formatters with fractional-second support for sync encoding/decoding.
+private enum SyncDateFormatters {
+    static let fractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    static let plain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+}
+
 /// Service for syncing notes with a remote server
 @MainActor
 class SyncService: ObservableObject {
@@ -21,13 +36,26 @@ class SyncService: ObservableObject {
 
     private let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            try container.encode(SyncDateFormatters.fractional.string(from: date))
+        }
         return encoder
     }()
 
     private let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let str = try container.decode(String.self)
+            if let date = SyncDateFormatters.fractional.date(from: str) {
+                return date
+            }
+            if let date = SyncDateFormatters.plain.date(from: str) {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Cannot decode date: \(str)")
+        }
         return decoder
     }()
 
@@ -76,8 +104,9 @@ class SyncService: ObservableObject {
 
             let syncResponse = try decoder.decode(SyncResponse.self, from: data)
 
-            // Update last sync time
-            if let serverTime = ISO8601DateFormatter().date(from: syncResponse.serverTime) {
+            // Update last sync time (try fractional seconds first)
+            if let serverTime = SyncDateFormatters.fractional.date(from: syncResponse.serverTime)
+                ?? SyncDateFormatters.plain.date(from: syncResponse.serverTime) {
                 lastSyncTime = serverTime
                 UserDefaults.standard.set(serverTime.timeIntervalSince1970, forKey: SettingsKeys.lastSyncTime)
             }

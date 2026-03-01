@@ -15,6 +15,7 @@ class DailyNoteService: ObservableObject {
     private let savePath: URL
     private let syncService = SyncService()
     private var syncTimer: Timer?
+    private var syncOperationInProgress = false
 
     init() {
         // Use local storage
@@ -51,9 +52,10 @@ class DailyNoteService: ObservableObject {
     }
 
     func performSync() async {
-        guard !isSyncing else { return }
+        guard !isSyncing, !syncOperationInProgress else { return }
 
         isSyncing = true
+        syncOperationInProgress = true
         syncError = nil
 
         // Flush currentNote into notesByDate before syncing to prevent data loss
@@ -61,13 +63,23 @@ class DailyNoteService: ObservableObject {
             notesByDate[currentNote.dateKey] = currentNote
         }
 
+        // Snapshot the current note before the async call so we can detect
+        // if the user edited it while we were awaiting the server.
+        let preSyncNote = currentNote
+
         if let mergedNotes = await syncService.sync(localNotes: notesByDate) {
             notesByDate = mergedNotes
 
-            // Re-read current note from merged results
-            if let updatedCurrentNote = mergedNotes[currentNote.dateKey] {
-                if updatedCurrentNote.updatedAt > currentNote.updatedAt {
-                    currentNote = updatedCurrentNote
+            // Check if the user edited currentNote while the sync was in flight
+            let userEditedDuringSync = currentNote.updatedAt > preSyncNote.updatedAt
+
+            if userEditedDuringSync {
+                // User's local edit is newer — write it back into merged results
+                notesByDate[currentNote.dateKey] = currentNote
+            } else if let mergedVersion = mergedNotes[currentNote.dateKey] {
+                if mergedVersion.updatedAt > currentNote.updatedAt {
+                    // Server had a newer version — update currentNote
+                    currentNote = mergedVersion
                     NotificationCenter.default.post(
                         name: .noteUpdated,
                         object: nil,
@@ -75,18 +87,23 @@ class DailyNoteService: ObservableObject {
                     )
                 }
             }
+            // If currentNote's dateKey is not in merged results, preserve it as-is
 
             saveNotesLocally()
         } else {
             syncError = syncService.syncError
         }
 
+        syncOperationInProgress = false
         isSyncing = false
     }
 
     private func pushCurrentNoteToServer() {
+        // Skip push if a sync is already in flight — the sync includes this note
+        guard !syncOperationInProgress else { return }
+        let noteToSend = currentNote
         Task {
-            _ = await syncService.pushNote(currentNote)
+            _ = await syncService.pushNote(noteToSend)
         }
     }
 
